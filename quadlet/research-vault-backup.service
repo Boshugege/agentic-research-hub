@@ -1,0 +1,10 @@
+[Unit]
+Description=Research vault and blob snapshot
+After=git-autosync.service
+
+[Service]
+Type=oneshot
+Environment=VAULT_PATH=%h/research-vault
+Environment=BLOBS_PATH=%h/research-blobs
+Environment=BACKUP_PATH=/srv/backup/research-vault
+ExecStart=%h/.local/bin/research-vault-backup

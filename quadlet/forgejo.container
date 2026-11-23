@@ -1,0 +1,36 @@
+[Unit]
+Description=Agentic Research Hub Forgejo
+After=network-online.target research-net-network.service
+Wants=network-online.target
+Requires=research-net-network.service
+
+[Container]
+ContainerName=forgejo
+Image=codeberg.org/forgejo/forgejo:10
+Network=research-net.network
+NetworkAlias=forgejo
+EnvironmentFile=%h/.config/agentic-research-hub/research.env
+Environment=USER_UID=1000
+Environment=USER_GID=1000
+Environment=FORGEJO__service__DISABLE_REGISTRATION=true
+Environment=FORGEJO__security__INSTALL_LOCK=true
+Environment=FORGEJO__server__ROOT_URL=http://127.0.0.1:18082/
+Volume=%h/research-state/forgejo:/data
+Volume=%h/research-vault:/data/git/repositories/research-vault.git
+PublishPort=127.0.0.1:18082:3000
+HealthCmd=/usr/bin/wget -q -O /dev/null http://127.0.0.1:3000/api/healthz
+HealthInterval=30s
+HealthTimeout=5s
+HealthRetries=3
+HealthStartPeriod=20s
+HealthOnFailure=restart
+LogDriver=journald
+
+[Service]
+Restart=always
+RestartSec=10
+TimeoutStartSec=180
+TimeoutStopSec=60
+
+[Install]
+WantedBy=default.target

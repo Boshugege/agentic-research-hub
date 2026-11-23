@@ -1,0 +1,8 @@
+[Unit]
+Description=Research vault automatic Git sync (commit local edits & sync merged PRs)
+After=hub-api.service forgejo.service
+
+[Service]
+Type=oneshot
+Environment=VAULT_PATH=%h/research-vault
+ExecStart=%h/.local/bin/research-git-autosync

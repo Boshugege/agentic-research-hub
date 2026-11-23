@@ -1,0 +1,9 @@
+[Unit]
+Description=Agentic Research Hub network
+
+[Network]
+NetworkName=research-net
+Internal=true
+
+[Install]
+WantedBy=default.target

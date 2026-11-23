@@ -1,0 +1,1217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Agentic Research Hub</title>
+<style>
+  :root {
+    --bg: #f7f7f5;
+    --surface: #ffffff;
+    --surface-2: #f1f2f0;
+    --surface-hover: #eceee9;
+    --border: #e3e5e0;
+    --border-strong: #cdd1c8;
+    --text: #181a18;
+    --text-muted: #5f655d;
+    --text-subtle: #8b9188;
+    --accent: #2563eb;
+    --accent-soft: #eff6ff;
+    --accent-border: #bfdbfe;
+    --agent: #7c3aed;
+    --agent-soft: #f5f3ff;
+    --human: #0284c7;
+    --human-soft: #e0f2fe;
+    --green: #16a34a;
+    --green-soft: #dcfce7;
+    --red: #dc2626;
+    --red-soft: #fee2e2;
+    --amber: #d97706;
+    --amber-soft: #fef3c7;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+    --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.08);
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", sans-serif;
+  }
+
+  [data-theme="dark"] {
+    --bg: #0f1115;
+    --surface: #161920;
+    --surface-2: #1d212b;
+    --surface-hover: #252a36;
+    --border: #262b36;
+    --border-strong: #373e4d;
+    --text: #eef0f4;
+    --text-muted: #a1a8b5;
+    --text-subtle: #6e7685;
+    --accent: #60a5fa;
+    --accent-soft: rgba(96, 165, 250, 0.14);
+    --accent-border: rgba(96, 165, 250, 0.35);
+    --agent: #a78bfa;
+    --agent-soft: rgba(167, 139, 250, 0.14);
+    --human: #38bdf8;
+    --human-soft: rgba(56, 189, 248, 0.14);
+    --green: #4ade80;
+    --green-soft: rgba(74, 222, 128, 0.14);
+    --red: #f87171;
+    --red-soft: rgba(248, 113, 113, 0.14);
+    --amber: #fbbf24;
+    --amber-soft: rgba(251, 191, 36, 0.14);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
+    --shadow-md: 0 10px 30px rgba(0, 0, 0, 0.45);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; font-family: var(--sans); background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.6; }
+  button, input, textarea, select { font-family: inherit; font-size: inherit; color: inherit; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* Login Gate */
+  #login-view {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px;
+    background: radial-gradient(circle at 20% 20%, var(--accent-soft), transparent 45%), var(--bg);
+  }
+  .login-card {
+    width: 100%; max-width: 380px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px; padding: 32px 28px; box-shadow: var(--shadow-md);
+  }
+  .login-badge {
+    display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+    background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 600; margin-bottom: 14px;
+  }
+  .login-card h1 { margin: 0 0 6px; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+  .login-card p { margin: 0 0 22px; color: var(--text-muted); font-size: 13px; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
+  .input, .textarea, .select {
+    width: 100%; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--border-strong);
+    background: var(--surface); color: var(--text); outline: none; transition: border-color .15s, box-shadow .15s;
+  }
+  .input:focus, .textarea:focus, .select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .textarea { resize: vertical; min-height: 140px; font-family: var(--mono); font-size: 13px; line-height: 1.55; }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border-strong);
+    background: var(--surface); color: var(--text); font-weight: 500; cursor: pointer;
+    transition: background .15s, border-color .15s, transform .05s; white-space: nowrap;
+  }
+  .btn:hover { background: var(--surface-hover); }
+  .btn:active { transform: translateY(1px); }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-primary:hover { filter: brightness(1.06); background: var(--accent); }
+  .btn-sm { padding: 5px 10px; font-size: 12px; border-radius: 6px; }
+  .btn-ghost { border-color: transparent; background: transparent; }
+  .btn-ghost:hover { background: var(--surface-hover); }
+
+  /* App Shell */
+  #app-view { display: none; height: 100vh; overflow: hidden; }
+  .shell { display: flex; height: 100%; }
+
+  /* Sidebar */
+  .sidebar {
+    width: 268px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; height: 100%; overflow: hidden;
+  }
+  .sidebar-header {
+    padding: 16px 16px 12px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  }
+  .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 15px; letter-spacing: -0.01em; cursor: pointer; }
+  .brand-dot { width: 10px; height: 10px; border-radius: 3px; background: linear-gradient(135deg, var(--accent), var(--agent)); }
+  .sidebar-search { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .sidebar-search input {
+    width: 100%; padding: 7px 10px; border-radius: 7px; border: 1px solid var(--border);
+    background: var(--surface-2); font-size: 13px; outline: none;
+  }
+  .sidebar-search input:focus { border-color: var(--accent); background: var(--surface); }
+  .sidebar-body { flex: 1; overflow-y: auto; padding: 10px 10px 16px; }
+  .nav-group-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 8px 6px; font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.05em; color: var(--text-subtle);
+  }
+  .nav-item {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 8px 10px; border-radius: 8px; cursor: pointer; color: var(--text);
+    transition: background .12s; margin-bottom: 2px;
+  }
+  .nav-item:hover { background: var(--surface-hover); }
+  .nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .nav-item-main { min-width: 0; display: flex; flex-direction: column; }
+  .nav-item-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; }
+  .nav-item-sub { font-size: 11px; color: var(--text-subtle); font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nav-item.active .nav-item-sub { color: var(--accent); opacity: 0.8; }
+  .pill {
+    display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 999px;
+    font-size: 11px; font-weight: 600; background: var(--surface-2); color: var(--text-muted); flex-shrink: 0;
+  }
+  .pill-accent { background: var(--accent-soft); color: var(--accent); }
+  .pill-agent { background: var(--agent-soft); color: var(--agent); }
+  .pill-human { background: var(--human-soft); color: var(--human); }
+  .pill-amber { background: var(--amber-soft); color: var(--amber); }
+  .pill-green { background: var(--green-soft); color: var(--green); }
+
+  .sidebar-footer {
+    padding: 10px 12px; border-top: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  }
+
+  /* Main Area */
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; height: 100%; overflow: hidden; }
+  .topbar {
+    min-height: 56px; padding: 10px 24px; background: var(--surface); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  }
+  .topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .topbar-title { font-size: 17px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+  .topbar-slug { font-family: var(--mono); font-size: 12px; color: var(--text-muted); background: var(--surface-2); padding: 2px 8px; border-radius: 6px; }
+  .tabs { display: inline-flex; background: var(--surface-2); padding: 3px; border-radius: 9px; gap: 2px; }
+  .tab {
+    padding: 5px 12px; border-radius: 6px; border: none; background: transparent;
+    cursor: pointer; font-size: 13px; font-weight: 500; color: var(--text-muted);
+  }
+  .tab.active { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: var(--shadow-sm); }
+  .content { flex: 1; overflow-y: auto; padding: 24px; }
+  .container { max-width: 1020px; margin: 0 auto; }
+
+  /* Cards & KPI */
+  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 24px; }
+  .kpi-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; box-shadow: var(--shadow-sm); }
+  .kpi-label { font-size: 12px; color: var(--text-muted); font-weight: 500; }
+  .kpi-value { font-size: 26px; font-weight: 700; margin-top: 4px; letter-spacing: -0.02em; }
+
+  .project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; margin-bottom: 28px; }
+  .project-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 18px; display: flex; flex-direction: column; gap: 10px; box-shadow: var(--shadow-sm);
+    transition: border-color .15s, transform .12s; cursor: pointer;
+  }
+  .project-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .project-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+  .project-card h3 { margin: 0; font-size: 16px; font-weight: 700; }
+  .project-card-desc { margin: 0; font-size: 13px; color: var(--text-muted); min-height: 20px; }
+  .project-card-meta { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--text-subtle); padding-top: 8px; border-top: 1px solid var(--border); }
+  .project-card-actions { display: flex; gap: 6px; }
+
+  .section-title { font-size: 14px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 14px; display: flex; align-items: center; justify-content: space-between; }
+
+  /* Vertical Timeline */
+  .timeline-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+  .timeline-month {
+    font-size: 12px; font-weight: 700; font-family: var(--mono); color: var(--text-muted);
+    background: var(--surface-2); display: inline-block; padding: 3px 10px; border-radius: 999px;
+    margin: 18px 0 12px;
+  }
+  .timeline-rail { position: relative; padding-left: 26px; border-left: 2px solid var(--border); margin-left: 8px; }
+  .timeline-card {
+    position: relative; background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px 18px; margin-bottom: 14px; box-shadow: var(--shadow-sm);
+  }
+  .timeline-card::before {
+    content: ""; position: absolute; left: -34px; top: 20px; width: 12px; height: 12px;
+    border-radius: 50%; background: var(--human); border: 2px solid var(--bg);
+  }
+  .timeline-card.is-agent::before { background: var(--agent); }
+  .timeline-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+  .timeline-card-title { font-size: 16px; font-weight: 700; margin: 0; }
+  .timeline-card-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--text-muted); margin-bottom: 10px; }
+  .timeline-time { font-family: var(--mono); color: var(--text-muted); font-size: 12px; }
+  .tag-chip { font-size: 11px; padding: 1px 7px; border-radius: 5px; background: var(--surface-2); color: var(--text-muted); font-family: var(--mono); }
+
+  /* Living Doc & Markdown Rendering */
+  .doc-shell { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 28px 32px; box-shadow: var(--shadow-sm); }
+  .doc-meta-bar {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+    padding-bottom: 16px; margin-bottom: 20px; border-bottom: 1px solid var(--border); font-size: 12.5px; color: var(--text-muted);
+  }
+  .md h1 { font-size: 24px; margin: 0 0 14px; letter-spacing: -0.02em; }
+  .md h2 { font-size: 18px; margin: 24px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  .md h3 { font-size: 15px; margin: 18px 0 8px; }
+  .md p { margin: 0 0 12px; }
+  .md ul, .md ol { margin: 0 0 12px; padding-left: 22px; }
+  .md li { margin-bottom: 4px; }
+  .md blockquote { margin: 0 0 12px; padding: 8px 14px; border-left: 3px solid var(--accent); background: var(--surface-2); border-radius: 0 6px 6px 0; color: var(--text-muted); }
+  .md code { font-family: var(--mono); font-size: 12.5px; background: var(--surface-2); padding: 2px 5px; border-radius: 4px; }
+  .md pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; overflow-x: auto; margin: 0 0 14px; }
+  .md pre code { background: transparent; padding: 0; font-size: 12.5px; }
+  .md table { width: 100%; border-collapse: collapse; margin: 0 0 14px; font-size: 13px; }
+  .md th, .md td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; }
+  .md th { background: var(--surface-2); font-weight: 600; }
+  .md hr { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
+  .wikilink { color: var(--accent); background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; font-weight: 500; cursor: pointer; }
+  .wikilink:hover { text-decoration: none; filter: brightness(0.95); }
+
+  /* Commits & Diff */
+  .history-grid { display: grid; grid-template-columns: 320px 1fr; gap: 16px; align-items: start; }
+  .commit-list { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .commit-item {
+    padding: 12px 14px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background .12s;
+  }
+  .commit-item:last-child { border-bottom: none; }
+  .commit-item:hover { background: var(--surface-hover); }
+  .commit-item.active { background: var(--accent-soft); border-left: 3px solid var(--accent); }
+  .commit-sha { font-family: var(--mono); font-size: 11.5px; color: var(--accent); font-weight: 600; }
+  .commit-subject { font-size: 13px; font-weight: 600; margin: 3px 0; word-break: break-word; }
+  .commit-date { font-size: 11.5px; color: var(--text-subtle); }
+  .diff-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .diff-header { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .diff-body { padding: 14px 16px; font-family: var(--mono); font-size: 12.5px; line-height: 1.55; overflow-x: auto; white-space: pre; }
+  .diff-line { display: block; padding: 0 6px; margin: 0 -6px; }
+  .diff-add { background: var(--green-soft); color: var(--green); }
+  .diff-del { background: var(--red-soft); color: var(--red); }
+  .diff-hunk { color: var(--accent); font-weight: 600; margin-top: 6px; }
+  .diff-meta { color: var(--text-subtle); }
+
+  /* Empty State & Modal */
+  .empty-state {
+    background: var(--surface); border: 1px dashed var(--border-strong); border-radius: var(--radius);
+    padding: 40px 24px; text-align: center; color: var(--text-muted);
+  }
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); display: none;
+    align-items: center; justify-content: center; padding: 16px; z-index: 50;
+  }
+  .modal-backdrop.open { display: flex; }
+  .modal {
+    width: 100%; max-width: 660px; max-height: 90vh; overflow-y: auto;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+    padding: 22px 24px; box-shadow: var(--shadow-md);
+  }
+  .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .modal-head h2 { margin: 0; font-size: 17px; }
+  .modal-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
+  .toast {
+    position: fixed; right: 20px; bottom: 20px; background: var(--text); color: var(--surface);
+    padding: 10px 16px; border-radius: 8px; font-size: 13px; font-weight: 500;
+    box-shadow: var(--shadow-md); opacity: 0; transform: translateY(8px);
+    transition: opacity .2s, transform .2s; pointer-events: none; z-index: 100;
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+
+  .mobile-menu-btn { display: none; }
+  @media (max-width: 860px) {
+    .sidebar { position: fixed; left: -280px; top: 0; bottom: 0; z-index: 40; transition: left .2s; box-shadow: var(--shadow-md); }
+    .sidebar.open { left: 0; }
+    .mobile-menu-btn { display: inline-flex; }
+    .history-grid { grid-template-columns: 1fr; }
+    .content { padding: 16px; }
+    .doc-shell { padding: 18px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Login Gate -->
+<div id="login-view">
+  <form class="login-card" id="login-form">
+    <div class="login-badge">🔒 Private Research Hub</div>
+    <h1>登录科研工作台</h1>
+    <p>请输入工作台访问密码以查看和编辑你的多项目时间线与统一总文档。</p>
+    <div class="field">
+      <label for="login-password">访问密码</label>
+      <input class="input" id="login-password" type="password" placeholder="输入 WEB_PASSWORD" autocomplete="current-password" required autofocus />
+    </div>
+    <div id="login-error" style="color:var(--red);font-size:12.5px;margin-bottom:12px;display:none;"></div>
+    <button class="btn btn-primary" style="width:100%;" type="submit">进入工作台</button>
+  </form>
+</div>
+
+<!-- Main App -->
+<div id="app-view">
+  <div class="shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="brand" id="nav-brand">
+          <span class="brand-dot"></span>
+          <span>Research Hub</span>
+        </div>
+        <button class="btn btn-sm btn-ghost" id="btn-refresh" title="刷新数据">↻</button>
+      </div>
+      <div class="sidebar-search">
+        <input id="global-search" type="search" placeholder="搜索项目、笔记、总文档... (Enter)" />
+      </div>
+      <div class="sidebar-body">
+        <div class="nav-item" id="nav-home">
+          <div class="nav-item-main"><span class="nav-item-title">🏠 全局总览</span></div>
+        </div>
+        <div class="nav-item" id="nav-inbox">
+          <div class="nav-item-main"><span class="nav-item-title">📥 待整理 Inbox</span></div>
+          <span class="pill" id="inbox-badge">0</span>
+        </div>
+        <div class="nav-group-header">
+          <span>研究项目</span>
+          <button class="btn btn-sm btn-ghost" id="btn-new-project" style="padding:2px 6px;">+ 新建</button>
+        </div>
+        <div id="sidebar-projects"></div>
+      </div>
+      <div class="sidebar-footer">
+        <a id="link-forgejo" href="#" target="_blank" rel="noopener" class="btn btn-sm btn-ghost" style="display:none;">Git 仓库 ↗</a>
+        <div style="display:flex;gap:4px;margin-left:auto;">
+          <button class="btn btn-sm btn-ghost" id="btn-theme" title="切换深浅色">◐</button>
+          <button class="btn btn-sm btn-ghost" id="btn-logout" title="退出登录">退出</button>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button class="btn btn-sm mobile-menu-btn" id="btn-mobile-menu">☰</button>
+          <h1 class="topbar-title" id="topbar-title">全局总览</h1>
+          <span class="topbar-slug" id="topbar-slug" style="display:none;"></span>
+        </div>
+        <div id="topbar-right" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"></div>
+      </header>
+      <div class="content" id="main-content">
+        <div class="container" id="view-root"></div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- Reusable Modal -->
+<div class="modal-backdrop" id="modal-backdrop">
+  <div class="modal" id="modal-box">
+    <div class="modal-head">
+      <h2 id="modal-title">Modal</h2>
+      <button class="btn btn-sm btn-ghost" id="modal-close">✕</button>
+    </div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const state = {
+  authenticated: false,
+  overview: null,
+  route: { view: "home", project: null, tab: "timeline" },
+  forgejoUrl: null,
+  projectCache: {},
+};
+
+// -------------------- Theme --------------------
+const savedTheme = localStorage.getItem("rh-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+document.documentElement.setAttribute("data-theme", savedTheme);
+document.getElementById("btn-theme").onclick = () => {
+  const next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  localStorage.setItem("rh-theme", next);
+};
+
+// -------------------- Helpers --------------------
+function esc(s) {
+  return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function shortTime(isoStr) {
+  if (!isoStr) return "";
+  return String(isoStr).replace("T", " ").slice(0, 16);
+}
+
+function toast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => el.classList.remove("show"), 2600);
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
+    ...opts,
+  });
+  if (res.status === 401) {
+    showLogin();
+    throw new Error("未登录或会话已过期");
+  }
+  const text = await res.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = { detail: text }; }
+  if (!res.ok) throw new Error((data && data.detail) || `请求失败 (${res.status})`);
+  return data;
+}
+
+// Lightweight safe Markdown + WikiLink renderer
+function renderMarkdown(md) {
+  if (!md) return "<p style='color:var(--text-subtle)'>暂无内容</p>";
+  const codeBlocks = [];
+  let text = String(md).replace(/\r\n/g, "\n");
+  text = text.replace(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g, (_, lang, code) => {
+    const idx = codeBlocks.length;
+    codeBlocks.push(`<pre><code>${esc(code.replace(/\n$/, ""))}</code></pre>`);
+    return `@@CODEBLOCK_${idx}@@`;
+  });
+
+  const lines = text.split("\n");
+  const out = [];
+  let inUl = false, inOl = false, inTable = false, tableHeadDone = false;
+
+  const closeLists = () => {
+    if (inUl) { out.push("</ul>"); inUl = false; }
+    if (inOl) { out.push("</ol>"); inOl = false; }
+    if (inTable) { out.push("</tbody></table>"); inTable = false; tableHeadDone = false; }
+  };
+
+  const inline = (s) => {
+    let r = esc(s);
+    r = r.replace(/`([^`]+)`/g, "<code>$1</code>");
+    // WikiLinks [[target|label]] or [[target]]
+    r = r.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, target, label) => {
+      const disp = label || target;
+      return `<span class="wikilink" data-wikilink="${esc(target)}">${disp}</span>`;
+    });
+    r = r.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) => `<img src="${url}" alt="${alt}" style="max-width:100%;border-radius:8px;margin:8px 0;" />`);
+    r = r.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, url) => {
+      const safeUrl = /^(https?:\/\/|\/blobs\/|#)/i.test(url) ? url : "#";
+      return `<a href="${safeUrl}" target="_blank" rel="noopener">${label}</a>`;
+    });
+    r = r.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    r = r.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+    return r;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (/^@@CODEBLOCK_(\d+)@@$/.test(trimmed)) {
+      closeLists();
+      out.push(codeBlocks[Number(trimmed.match(/\d+/)[0])]);
+      continue;
+    }
+    if (!trimmed) { closeLists(); continue; }
+    if (/^---+$/.test(trimmed)) { closeLists(); out.push("<hr />"); continue; }
+
+    // Table
+    if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
+      const cells = trimmed.slice(1, -1).split("|").map(c => c.trim());
+      if (!inTable) {
+        closeLists();
+        inTable = true;
+        tableHeadDone = false;
+        out.push("<table><thead><tr>" + cells.map(c => `<th>${inline(c)}</th>`).join("") + "</tr></thead><tbody>");
+      } else if (!tableHeadDone && cells.every(c => /^:?-+:?$/.test(c))) {
+        tableHeadDone = true;
+      } else {
+        out.push("<tr>" + cells.map(c => `<td>${inline(c)}</td>`).join("") + "</tr>");
+      }
+      continue;
+    } else if (inTable) {
+      closeLists();
+    }
+
+    const hMatch = trimmed.match(/^(#{1,4})\s+(.+)$/);
+    if (hMatch) {
+      closeLists();
+      const lvl = hMatch[1].length;
+      out.push(`<h${lvl}>${inline(hMatch[2])}</h${lvl}>`);
+      continue;
+    }
+    if (trimmed.startsWith(">")) {
+      closeLists();
+      out.push(`<blockquote>${inline(trimmed.replace(/^>\s?/, ""))}</blockquote>`);
+      continue;
+    }
+    const ulMatch = trimmed.match(/^[-*+]\s+(.+)$/);
+    if (ulMatch) {
+      if (inOl) { out.push("</ol>"); inOl = false; }
+      if (!inUl) { out.push("<ul>"); inUl = true; }
+      out.push(`<li>${inline(ulMatch[1])}</li>`);
+      continue;
+    }
+    const olMatch = trimmed.match(/^\d+\.\s+(.+)$/);
+    if (olMatch) {
+      if (inUl) { out.push("</ul>"); inUl = false; }
+      if (!inOl) { out.push("<ol>"); inOl = true; }
+      out.push(`<li>${inline(olMatch[1])}</li>`);
+      continue;
+    }
+    closeLists();
+    out.push(`<p>${inline(trimmed)}</p>`);
+  }
+  closeLists();
+  return out.join("\n");
+}
+
+function bindWikiLinks(container) {
+  container.querySelectorAll("[data-wikilink]").forEach(el => {
+    el.onclick = () => {
+      const target = el.getAttribute("data-wikilink") || "";
+      if (target === "index") return navigate("home");
+      const m = target.match(/^projects\/([^/]+)\/(.+)$/);
+      if (m) {
+        const slug = m[1];
+        const rest = m[2];
+        if (rest.startsWith("LIVING_DOC")) return navigate("project", slug, "living");
+        if (rest.startsWith("INDEX")) return navigate("project", slug, "timeline");
+        if (rest.startsWith("timeline/")) {
+          return openNotePreviewModal(target.endsWith(".md") ? target : target + ".md");
+        }
+      }
+      openNotePreviewModal(target.endsWith(".md") ? target : target + ".md");
+    };
+  });
+}
+
+// -------------------- Modal --------------------
+function openModal(title, html) {
+  document.getElementById("modal-title").textContent = title;
+  document.getElementById("modal-body").innerHTML = html;
+  document.getElementById("modal-backdrop").classList.add("open");
+}
+function closeModal() {
+  document.getElementById("modal-backdrop").classList.remove("open");
+}
+document.getElementById("modal-close").onclick = closeModal;
+document.getElementById("modal-backdrop").onclick = (e) => { if (e.target.id === "modal-backdrop") closeModal(); };
+
+// -------------------- Auth Flow --------------------
+function showLogin() {
+  state.authenticated = false;
+  document.getElementById("app-view").style.display = "none";
+  document.getElementById("login-view").style.display = "flex";
+}
+
+function showApp() {
+  state.authenticated = true;
+  document.getElementById("login-view").style.display = "none";
+  document.getElementById("app-view").style.display = "block";
+}
+
+document.getElementById("login-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const pw = document.getElementById("login-password").value;
+  const errEl = document.getElementById("login-error");
+  errEl.style.display = "none";
+  try {
+    await api("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ password: pw }) });
+    document.getElementById("login-password").value = "";
+    await bootstrap();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = "block";
+  }
+};
+
+document.getElementById("btn-logout").onclick = async () => {
+  await fetch("/api/v1/auth/logout", { method: "POST", credentials: "same-origin" });
+  showLogin();
+  toast("已退出登录");
+};
+
+// -------------------- Sidebar & Routing --------------------
+function renderSidebar() {
+  const ov = state.overview;
+  if (!ov) return;
+  document.getElementById("inbox-badge").textContent = ov.inbox_count;
+  document.getElementById("inbox-badge").className = ov.inbox_count > 0 ? "pill pill-amber" : "pill";
+  document.getElementById("nav-home").className = "nav-item" + (state.route.view === "home" ? " active" : "");
+  document.getElementById("nav-inbox").className = "nav-item" + (state.route.view === "inbox" ? " active" : "");
+
+  const list = document.getElementById("sidebar-projects");
+  list.innerHTML = ov.projects.map(p => {
+    const active = state.route.view === "project" && state.route.project === p.slug;
+    return `
+      <div class="nav-item ${active ? "active" : ""}" data-slug="${esc(p.slug)}">
+        <div class="nav-item-main">
+          <span class="nav-item-title">${esc(p.name || p.slug)}</span>
+          <span class="nav-item-sub">${esc(p.slug)}</span>
+        </div>
+        <span class="pill ${active ? "pill-accent" : ""}">${p.timeline_count || 0}</span>
+      </div>`;
+  }).join("");
+
+  list.querySelectorAll(".nav-item").forEach(el => {
+    el.onclick = () => {
+      document.getElementById("sidebar").classList.remove("open");
+      navigate("project", el.getAttribute("data-slug"), "timeline");
+    };
+  });
+
+  const fg = document.getElementById("link-forgejo");
+  if (ov.forgejo_public_url) {
+    fg.href = ov.forgejo_public_url;
+    fg.style.display = "inline-flex";
+  }
+}
+
+async function navigate(view, project = null, tab = "timeline") {
+  state.route = { view, project, tab };
+  renderSidebar();
+  if (view === "home") await renderHomeView();
+  else if (view === "inbox") await renderInboxView();
+  else if (view === "project") await renderProjectView(project, tab);
+  else if (view === "search") await renderSearchView(project);
+}
+
+// -------------------- View: Home Overview --------------------
+async function renderHomeView() {
+  const ov = state.overview;
+  document.getElementById("topbar-title").textContent = "全局总览";
+  document.getElementById("topbar-slug").style.display = "none";
+  document.getElementById("topbar-right").innerHTML = `
+    <button class="btn btn-sm" id="top-new-project">+ 新建项目</button>
+    <button class="btn btn-sm btn-primary" id="top-quick-note">+ 快速记一条时间线</button>
+  `;
+  document.getElementById("top-new-project").onclick = openCreateProjectModal;
+  document.getElementById("top-quick-note").onclick = () => openNewTimelineModal(ov.projects[0]?.slug || "misc");
+
+  const root = document.getElementById("view-root");
+  const projCards = ov.projects.map(p => `
+    <div class="project-card" data-open-proj="${esc(p.slug)}">
+      <div class="project-card-head">
+        <div>
+          <h3>${esc(p.name || p.slug)}</h3>
+          <span class="topbar-slug" style="display:inline-block;margin-top:4px;">${esc(p.slug)}</span>
+        </div>
+        <span class="pill ${p.status === "active" ? "pill-green" : ""}">${esc(p.status || "active")}</span>
+      </div>
+      <p class="project-card-desc">${esc(p.description || (p.latest_timeline_title ? "最近更新：" + p.latest_timeline_title : "尚无时间线记录，等待你或 AI Agent 写入。"))}</p>
+      <div class="project-card-meta">
+        <span>🕒 ${p.timeline_count || 0} 条时间线${p.latest_timeline_at ? " · " + shortTime(p.latest_timeline_at) : ""}</span>
+        <div class="project-card-actions">
+          <button class="btn btn-sm" data-jump="${esc(p.slug)}:timeline">时间线</button>
+          <button class="btn btn-sm" data-jump="${esc(p.slug)}:living">总文档</button>
+        </div>
+      </div>
+    </div>`).join("");
+
+  const recentFeed = ov.recent_timeline.length ? `
+    <div class="timeline-rail">
+      ${ov.recent_timeline.map(item => {
+        const isAgent = String(item.author || "").startsWith("agent:");
+        return `
+          <div class="timeline-card ${isAgent ? "is-agent" : ""}" style="cursor:pointer;" data-feed-path="${esc(item.path)}" data-feed-proj="${esc(item.project)}">
+            <div class="timeline-card-meta">
+              <span class="timeline-time">${shortTime(item.created_at)}</span>
+              <span class="pill pill-accent">${esc(item.project)}</span>
+              <span class="pill ${isAgent ? "pill-agent" : "pill-human"}">${esc(item.author)}</span>
+              ${(item.tags || []).map(t => `<span class="tag-chip">#${esc(t)}</span>`).join("")}
+            </div>
+            <h4 class="timeline-card-title" style="font-size:15px;">${esc(item.title)}</h4>
+            ${item.excerpt ? `<p style="margin:6px 0 0;color:var(--text-muted);font-size:13px;">${esc(item.excerpt)}</p>` : ""}
+          </div>`;
+      }).join("")}
+    </div>` : `
+    <div class="empty-state">
+      <div style="font-size:28px;margin-bottom:8px;">🕒</div>
+      <div style="font-weight:600;color:var(--text);margin-bottom:4px;">还没有任何时间线记录</div>
+      <div>点击右上角「+ 快速记一条时间线」，或者让各项目 Agent 通过 MCP / REST API 接入写入。</div>
+    </div>`;
+
+  root.innerHTML = `
+    <div class="kpi-grid">
+      <div class="kpi-card"><div class="kpi-label">已注册研究项目</div><div class="kpi-value">${ov.projects.length}</div></div>
+      <div class="kpi-card"><div class="kpi-label">时间线笔记总数</div><div class="kpi-value">${ov.total_timeline}</div></div>
+      <div class="kpi-card"><div class="kpi-label">待整理 Inbox 日志</div><div class="kpi-value">${ov.inbox_count}</div></div>
+    </div>
+    <div class="section-title"><span>📂 研究项目</span></div>
+    <div class="project-grid">${projCards}</div>
+    <div class="section-title"><span>🕒 全站最新时间线</span></div>
+    ${recentFeed}
+  `;
+
+  root.querySelectorAll("[data-jump]").forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const [slug, tab] = btn.getAttribute("data-jump").split(":");
+      navigate("project", slug, tab);
+    };
+  });
+  root.querySelectorAll("[data-open-proj]").forEach(card => {
+    card.onclick = () => navigate("project", card.getAttribute("data-open-proj"), "timeline");
+  });
+  root.querySelectorAll("[data-feed-path]").forEach(card => {
+    card.onclick = () => openNotePreviewModal(card.getAttribute("data-feed-path"));
+  });
+}
+
+// -------------------- View: Project Workspace --------------------
+async function renderProjectView(slug, tab) {
+  const projMeta = (state.overview?.projects || []).find(p => p.slug === slug) || { slug, name: slug };
+  document.getElementById("topbar-title").textContent = projMeta.name || slug;
+  const slugEl = document.getElementById("topbar-slug");
+  slugEl.textContent = slug;
+  slugEl.style.display = "inline-block";
+
+  document.getElementById("topbar-right").innerHTML = `
+    <div class="tabs">
+      <button class="tab ${tab === "timeline" ? "active" : ""}" data-tab="timeline">🕒 时间线 (${projMeta.timeline_count || 0})</button>
+      <button class="tab ${tab === "living" ? "active" : ""}" data-tab="living">📄 统一总文档</button>
+      <button class="tab ${tab === "history" ? "active" : ""}" data-tab="history">🧬 Commit 演进</button>
+    </div>
+    <button class="btn btn-sm btn-primary" id="btn-add-timeline">+ 新增时间线</button>
+  `;
+  document.querySelectorAll(".tab").forEach(b => {
+    b.onclick = () => navigate("project", slug, b.getAttribute("data-tab"));
+  });
+  document.getElementById("btn-add-timeline").onclick = () => openNewTimelineModal(slug);
+
+  const root = document.getElementById("view-root");
+  root.innerHTML = `<div style="padding:32px;text-align:center;color:var(--text-muted);">加载中...</div>`;
+
+  if (tab === "timeline") await renderProjectTimelineTab(slug, root);
+  else if (tab === "living") await renderProjectLivingTab(slug, root);
+  else if (tab === "history") await renderProjectHistoryTab(slug, root);
+}
+
+async function renderProjectTimelineTab(slug, root) {
+  const data = await api(`/api/v1/projects/${encodeURIComponent(slug)}/timeline?limit=100&include_content=true`);
+  const items = data.items || [];
+
+  const renderList = (filterText = "") => {
+    const q = filterText.trim().toLowerCase();
+    const filtered = q ? items.filter(it =>
+      (it.title || "").toLowerCase().includes(q) ||
+      (it.body || "").toLowerCase().includes(q) ||
+      (it.tags || []).some(t => t.toLowerCase().includes(q)) ||
+      (it.author || "").toLowerCase().includes(q)
+    ) : items;
+
+    if (!filtered.length) {
+      return `<div class="empty-state">
+        <div style="font-size:26px;margin-bottom:8px;">🕒</div>
+        <div style="font-weight:600;color:var(--text);margin-bottom:4px;">${q ? "没有匹配的时间线笔记" : "该项目暂无时间线记录"}</div>
+        <div>点击右上角「+ 新增时间线」手动记录，或由项目 Agent 调用 <code>append_timeline_note</code> 自动写入。</div>
+      </div>`;
+    }
+
+    let html = "";
+    let curMonth = null;
+    for (const item of filtered) {
+      const m = (item.created_at || "").slice(0, 7) || "未分组";
+      if (m !== curMonth) {
+        if (curMonth !== null) html += `</div>`;
+        curMonth = m;
+        html += `<div class="timeline-month">${esc(m)}</div><div class="timeline-rail">`;
+      }
+      const isAgent = String(item.author || "").startsWith("agent:");
+      const bodyClean = (item.body || "").replace(/^#\s+[^\n]+\n+/, "");
+      html += `
+        <article class="timeline-card ${isAgent ? "is-agent" : ""}">
+          <div class="timeline-card-head">
+            <h3 class="timeline-card-title">${esc(item.title)}</h3>
+            <button class="btn btn-sm btn-ghost" data-edit-note="${esc(item.path)}">✏️ 编辑</button>
+          </div>
+          <div class="timeline-card-meta">
+            <span class="timeline-time">${shortTime(item.created_at)}</span>
+            <span class="pill ${isAgent ? "pill-agent" : "pill-human"}">${esc(item.author)}</span>
+            <span class="pill">${esc(item.status)}</span>
+            ${(item.tags || []).map(t => `<span class="tag-chip">#${esc(t)}</span>`).join("")}
+          </div>
+          <div class="md">${renderMarkdown(bodyClean)}</div>
+        </article>`;
+    }
+    if (curMonth !== null) html += `</div>`;
+    return html;
+  };
+
+  root.innerHTML = `
+    <div class="timeline-toolbar">
+      <input class="input" id="tl-filter" style="max-width:340px;" placeholder="过滤本项目时间线（标题 / 内容 / 标签 / 作者）..." />
+      <span style="font-size:12.5px;color:var(--text-muted);">共 ${items.length} 条记录（按时间倒序）</span>
+    </div>
+    <div id="tl-list">${renderList()}</div>
+  `;
+
+  const bindCards = () => {
+    const listEl = document.getElementById("tl-list");
+    bindWikiLinks(listEl);
+    listEl.querySelectorAll("[data-edit-note]").forEach(btn => {
+      btn.onclick = () => openEditNoteModal(btn.getAttribute("data-edit-note"), () => renderProjectView(slug, "timeline"));
+    });
+  };
+  bindCards();
+  document.getElementById("tl-filter").oninput = (e) => {
+    document.getElementById("tl-list").innerHTML = renderList(e.target.value);
+    bindCards();
+  };
+}
+
+async function renderProjectLivingTab(slug, root) {
+  const [ctx, hist] = await Promise.all([
+    api(`/api/v1/projects/${encodeURIComponent(slug)}/context?recent_days=14`),
+    api(`/api/v1/living-doc/${encodeURIComponent(slug)}/history?limit=30`),
+  ]);
+  const meta = ctx.living_frontmatter || {};
+  const commitsCount = (hist.history || []).length;
+
+  root.innerHTML = `
+    <div class="doc-shell" id="living-read-box">
+      <div class="doc-meta-bar">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span>最后更新：<strong>${esc(shortTime(meta.updated_at) || "未知")}</strong></span>
+          <span class="pill ${String(meta.author || "").startsWith("agent:") ? "pill-agent" : "pill-human"}">${esc(meta.author || "human")}</span>
+          <span class="pill" style="cursor:pointer;" id="jump-history">🧬 ${commitsCount} 次 Commit</span>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-sm btn-primary" id="btn-edit-living">✏️ 编辑并 Commit</button>
+        </div>
+      </div>
+      <div class="md" id="living-md">${renderMarkdown(ctx.living_body || ctx.living_doc)}</div>
+    </div>
+    <div class="doc-shell" id="living-edit-box" style="display:none;">
+      <div class="field">
+        <label>LIVING_DOC.md 完整内容（含 Frontmatter）</label>
+        <textarea class="textarea" id="living-editor" style="min-height:460px;">${esc(ctx.living_doc)}</textarea>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 190px;gap:12px;">
+        <div class="field">
+          <label>Commit 说明（将记录在 Git 历史中）</label>
+          <input class="input" id="living-summary" placeholder="例如：整合 11-23 实验结论与下一步计划" />
+        </div>
+        <div class="field">
+          <label>提交方式</label>
+          <select class="select" id="living-mode">
+            <option value="direct">直接 Commit 到 main</option>
+            <option value="pr">推送分支并创建 PR</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;">
+        <button class="btn" id="btn-cancel-living">取消</button>
+        <button class="btn btn-primary" id="btn-save-living">保存并提交 Git Commit</button>
+      </div>
+    </div>
+  `;
+
+  bindWikiLinks(document.getElementById("living-md"));
+  document.getElementById("jump-history").onclick = () => navigate("project", slug, "history");
+  document.getElementById("btn-edit-living").onclick = () => {
+    document.getElementById("living-read-box").style.display = "none";
+    document.getElementById("living-edit-box").style.display = "block";
+  };
+  document.getElementById("btn-cancel-living").onclick = () => {
+    document.getElementById("living-edit-box").style.display = "none";
+    document.getElementById("living-read-box").style.display = "block";
+  };
+  document.getElementById("btn-save-living").onclick = async () => {
+    const patch = document.getElementById("living-editor").value;
+    const summary = document.getElementById("living-summary").value.trim() || "manual update via web workbench";
+    const mode = document.getElementById("living-mode").value;
+    try {
+      const res = await api("/api/v1/living-doc", {
+        method: "POST",
+        body: JSON.stringify({ project: slug, patch, summary, mode, actor: "human" }),
+      });
+      toast(mode === "pr" ? `已创建 PR 分支：${res.branch}` : `已提交 Commit ${res.commit.slice(0, 7)}`);
+      await reloadOverview();
+      await renderProjectView(slug, "living");
+    } catch (err) {
+      toast("保存失败：" + err.message);
+    }
+  };
+}
+
+async function renderProjectHistoryTab(slug, root) {
+  const data = await api(`/api/v1/living-doc/${encodeURIComponent(slug)}/history?limit=40`);
+  const history = data.history || [];
+  if (!history.length) {
+    root.innerHTML = `<div class="empty-state">LIVING_DOC.md 尚无 Git Commit 历史。</div>`;
+    return;
+  }
+
+  root.innerHTML = `
+    <div class="history-grid">
+      <div class="commit-list" id="commit-list">
+        ${history.map((c, i) => `
+          <div class="commit-item ${i === 0 ? "active" : ""}" data-sha="${esc(c.commit)}">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
+              <span class="commit-sha">${esc(c.short_commit)}</span>
+              <span class="pill ${String(c.actor || "").startsWith("agent:") ? "pill-agent" : "pill-human"}">${esc(c.actor)}</span>
+            </div>
+            <div class="commit-subject">${esc(c.subject)}</div>
+            <div class="commit-date">${esc(shortTime(c.date))}</div>
+          </div>`).join("")}
+      </div>
+      <div class="diff-panel" id="diff-panel">
+        <div style="padding:24px;color:var(--text-muted);">选择左侧 Commit 查看 Diff...</div>
+      </div>
+    </div>
+  `;
+
+  let viewMode = "diff";
+  const loadDiff = async (sha) => {
+    const panel = document.getElementById("diff-panel");
+    panel.innerHTML = `<div style="padding:24px;color:var(--text-muted);">加载 Commit ${esc(sha.slice(0, 7))}...</div>`;
+    const d = await api(`/api/v1/living-doc/${encodeURIComponent(slug)}/diff?commit_sha=${encodeURIComponent(sha)}`);
+    const renderDiffLines = (txt) => {
+      if (!txt) return "<span class='diff-meta'>该提交无文本变更</span>";
+      return txt.split("\n").map(line => {
+        let cls = "diff-line";
+        if (line.startsWith("+") && !line.startsWith("+++")) cls += " diff-add";
+        else if (line.startsWith("-") && !line.startsWith("---")) cls += " diff-del";
+        else if (line.startsWith("@@")) cls += " diff-hunk";
+        else if (line.startsWith("diff ") || line.startsWith("index ") || line.startsWith("---") || line.startsWith("+++")) cls += " diff-meta";
+        return `<span class="${cls}">${esc(line)}</span>`;
+      }).join("");
+    };
+
+    const draw = () => {
+      panel.innerHTML = `
+        <div class="diff-header">
+          <div>
+            <div style="font-weight:700;font-size:14px;">${esc(d.subject)}</div>
+            <div style="font-size:12px;color:var(--text-muted);font-family:var(--mono);">${esc(d.commit.slice(0, 10))} · ${esc(shortTime(d.date))}</div>
+          </div>
+          <div class="tabs">
+            <button class="tab ${viewMode === "diff" ? "active" : ""}" id="dm-diff">Git Diff</button>
+            <button class="tab ${viewMode === "snap" ? "active" : ""}" id="dm-snap">版本快照</button>
+          </div>
+        </div>
+        ${viewMode === "diff"
+          ? `<div class="diff-body">${renderDiffLines(d.diff)}</div>`
+          : `<div style="padding:20px 24px;" class="md">${renderMarkdown((d.snapshot || "").replace(/^---[\s\S]*?---\n?/, ""))}</div>`}
+      `;
+      document.getElementById("dm-diff").onclick = () => { viewMode = "diff"; draw(); };
+      document.getElementById("dm-snap").onclick = () => { viewMode = "snap"; draw(); };
+      bindWikiLinks(panel);
+    };
+    draw();
+  };
+
+  document.querySelectorAll(".commit-item").forEach(el => {
+    el.onclick = () => {
+      document.querySelectorAll(".commit-item").forEach(x => x.classList.remove("active"));
+      el.classList.add("active");
+      loadDiff(el.getAttribute("data-sha"));
+    };
+  });
+  loadDiff(history[0].commit);
+}
+
+// -------------------- View: Inbox --------------------
+async function renderInboxView() {
+  const ov = state.overview;
+  document.getElementById("topbar-title").textContent = "待整理 Inbox";
+  document.getElementById("topbar-slug").style.display = "none";
+  document.getElementById("topbar-right").innerHTML = "";
+  const root = document.getElementById("view-root");
+
+  if (!ov.inbox.length) {
+    root.innerHTML = `<div class="empty-state"><div style="font-size:28px;margin-bottom:8px;">✅</div><div style="font-weight:600;color:var(--text);">Inbox 已清空</div><div>暂无待归类的杂乱日志。</div></div>`;
+    return;
+  }
+
+  const projOptions = ov.projects.map(p => `<option value="${esc(p.slug)}">${esc(p.name || p.slug)} (${esc(p.slug)})</option>`).join("");
+  root.innerHTML = ov.inbox.map((item, idx) => `
+    <div class="timeline-card" style="margin-bottom:14px;">
+      <div class="timeline-card-head">
+        <div>
+          <h3 class="timeline-card-title">${esc(item.title)}</h3>
+          <div class="timeline-time">${esc(item.path)} · ${shortTime(item.created_at)}</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <select class="select" id="triage-proj-${idx}" style="width:auto;">${projOptions}</select>
+          <button class="btn btn-sm btn-primary" data-triage-idx="${idx}">归档到项目时间线</button>
+        </div>
+      </div>
+      <div class="md" style="max-height:240px;overflow-y:auto;border-top:1px solid var(--border);padding-top:10px;">
+        ${renderMarkdown(item.content.replace(/^---[\s\S]*?---\n?/, ""))}
+      </div>
+    </div>`).join("");
+
+  root.querySelectorAll("[data-triage-idx]").forEach(btn => {
+    btn.onclick = async () => {
+      const idx = Number(btn.getAttribute("data-triage-idx"));
+      const item = ov.inbox[idx];
+      const target = document.getElementById(`triage-proj-${idx}`).value;
+      try {
+        await api("/api/v1/inbox/triage", {
+          method: "POST",
+          body: JSON.stringify({ item_path: item.path, target_project: target, distilled_content: item.content }),
+        });
+        toast(`已归档到 ${target}`);
+        await reloadOverview();
+        await navigate("inbox");
+      } catch (err) {
+        toast("归档失败：" + err.message);
+      }
+    };
+  });
+}
+
+// -------------------- View: Search --------------------
+async function renderSearchView(query) {
+  document.getElementById("topbar-title").textContent = `搜索：${query}`;
+  document.getElementById("topbar-slug").style.display = "none";
+  document.getElementById("topbar-right").innerHTML = "";
+  const root = document.getElementById("view-root");
+  const data = await api("/api/v1/search", { method: "POST", body: JSON.stringify({ query, limit: 40 }) });
+  const results = data.results || [];
+  if (!results.length) {
+    root.innerHTML = `<div class="empty-state">未找到包含「${esc(query)}」的内容。</div>`;
+    return;
+  }
+  root.innerHTML = results.map(r => `
+    <div class="timeline-card" style="cursor:pointer;" data-open-note="${esc(r.path)}">
+      <div class="timeline-card-meta">
+        <span class="pill pill-accent">${esc(r.frontmatter?.project || "vault")}</span>
+        <span class="timeline-time">${esc(r.path)} : L${r.line}</span>
+      </div>
+      <div style="font-family:var(--mono);font-size:13px;">${esc(r.snippet)}</div>
+    </div>`).join("");
+  root.querySelectorAll("[data-open-note]").forEach(el => {
+    el.onclick = () => openNotePreviewModal(el.getAttribute("data-open-note"));
+  });
+}
+
+// -------------------- Modals: Create Project / Timeline / Edit Note --------------------
+function openCreateProjectModal() {
+  openModal("新建研究项目", `
+    <div class="field"><label>项目标识 slug（小写英文/数字/连字符）</label><input class="input" id="np-slug" placeholder="例如：footstep-viz 或 agent-eval" /></div>
+    <div class="field"><label>显示名称</label><input class="input" id="np-name" placeholder="例如：脚步识别与可视化" /></div>
+    <div class="field"><label>一句话简介</label><input class="input" id="np-desc" placeholder="研究目标与核心方向" /></div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" id="np-submit">创建并初始化 Git 结构</button>
+    </div>
+  `);
+  document.getElementById("np-submit").onclick = async () => {
+    const slug = document.getElementById("np-slug").value.trim();
+    const name = document.getElementById("np-name").value.trim() || slug;
+    const description = document.getElementById("np-desc").value.trim();
+    try {
+      const res = await api("/api/v1/projects", {
+        method: "POST",
+        body: JSON.stringify({ slug, name, description, actor: "human" }),
+      });
+      closeModal();
+      toast(`项目 ${res.slug} 已就绪`);
+      await reloadOverview();
+      await navigate("project", res.slug, "timeline");
+    } catch (err) {
+      toast("创建失败：" + err.message);
+    }
+  };
+}
+
+function openNewTimelineModal(defaultSlug) {
+  const options = (state.overview?.projects || []).map(p =>
+    `<option value="${esc(p.slug)}" ${p.slug === defaultSlug ? "selected" : ""}>${esc(p.name || p.slug)} (${esc(p.slug)})</option>`
+  ).join("");
+  openModal("新增时间线笔记", `
+    <div style="display:grid;grid-template-columns:1fr 140px;gap:12px;">
+      <div class="field"><label>所属项目</label><select class="select" id="nt-proj">${options}</select></div>
+      <div class="field"><label>状态</label><select class="select" id="nt-status"><option value="draft">draft</option><option value="verified">verified</option></select></div>
+    </div>
+    <div class="field"><label>标题</label><input class="input" id="nt-title" placeholder="例如：传感器滤波实验结果分析" /></div>
+    <div class="field"><label>标签（逗号分隔，可选）</label><input class="input" id="nt-tags" placeholder="experiment, pipeline, bugfix" /></div>
+    <div class="field"><label>正文（支持 Markdown）</label><textarea class="textarea" id="nt-content" style="min-height:220px;" placeholder="记录本次实验发现、参数、结论或待办..."></textarea></div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" id="nt-submit">保存并自动 Commit</button>
+    </div>
+  `);
+  document.getElementById("nt-submit").onclick = async () => {
+    const project = document.getElementById("nt-proj").value;
+    const title = document.getElementById("nt-title").value.trim();
+    const content = document.getElementById("nt-content").value.trim();
+    const status = document.getElementById("nt-status").value;
+    const tags = document.getElementById("nt-tags").value.split(",").map(s => s.trim()).filter(Boolean);
+    if (!title || !content) return toast("请填写标题和正文");
+    try {
+      const res = await api("/api/v1/timeline", {
+        method: "POST",
+        body: JSON.stringify({ project, title, content, tags, status, author: "human" }),
+      });
+      closeModal();
+      toast(`已写入时间线 (${res.commit.slice(0, 7)})`);
+      await reloadOverview();
+      await navigate("project", project, "timeline");
+    } catch (err) {
+      toast("保存失败：" + err.message);
+    }
+  };
+}
+
+async function openNotePreviewModal(path) {
+  try {
+    const note = await api(`/api/v1/notes?path=${encodeURIComponent(path)}`);
+    openModal(note.frontmatter?.title || note.path, `
+      <div style="font-size:12px;color:var(--text-muted);font-family:var(--mono);margin-bottom:12px;">${esc(note.path)}</div>
+      <div class="md" id="preview-md">${renderMarkdown(note.body || note.content)}</div>
+      <div class="modal-foot">
+        <button class="btn" id="preview-edit-btn">✏️ 编辑此笔记</button>
+        <button class="btn btn-primary" onclick="closeModal()">关闭</button>
+      </div>
+    `);
+    bindWikiLinks(document.getElementById("preview-md"));
+    document.getElementById("preview-edit-btn").onclick = () => openEditNoteModal(note.path, () => reloadOverview());
+  } catch (err) {
+    toast("无法打开笔记：" + err.message);
+  }
+}
+
+async function openEditNoteModal(path, onSaved) {
+  const note = await api(`/api/v1/notes?path=${encodeURIComponent(path)}`);
+  openModal(`编辑：${note.frontmatter?.title || note.path}`, `
+    <div style="font-size:12px;color:var(--text-muted);font-family:var(--mono);margin-bottom:10px;">${esc(note.path)}</div>
+    <div class="field"><textarea class="textarea" id="en-content" style="min-height:340px;">${esc(note.content)}</textarea></div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" id="en-save">保存并 Commit</button>
+    </div>
+  `);
+  document.getElementById("en-save").onclick = async () => {
+    try {
+      const res = await api("/api/v1/notes", {
+        method: "PUT",
+        body: JSON.stringify({ path: note.path, content: document.getElementById("en-content").value, actor: "human" }),
+      });
+      closeModal();
+      toast(`已更新 (${res.commit.slice(0, 7)})`);
+      await reloadOverview();
+      if (onSaved) await onSaved();
+    } catch (err) {
+      toast("更新失败：" + err.message);
+    }
+  };
+}
+
+// -------------------- Wiring & Bootstrap --------------------
+document.getElementById("nav-brand").onclick = () => navigate("home");
+document.getElementById("nav-home").onclick = () => { document.getElementById("sidebar").classList.remove("open"); navigate("home"); };
+document.getElementById("nav-inbox").onclick = () => { document.getElementById("sidebar").classList.remove("open"); navigate("inbox"); };
+document.getElementById("btn-new-project").onclick = openCreateProjectModal;
+document.getElementById("btn-mobile-menu").onclick = () => document.getElementById("sidebar").classList.toggle("open");
+document.getElementById("btn-refresh").onclick = async () => {
+  await reloadOverview();
+  await navigate(state.route.view, state.route.project, state.route.tab);
+  toast("已同步最新数据");
+};
+document.getElementById("global-search").onkeydown = (e) => {
+  if (e.key === "Enter" && e.target.value.trim()) {
+    document.getElementById("sidebar").classList.remove("open");
+    navigate("search", e.target.value.trim());
+  }
+};
+
+async function reloadOverview() {
+  state.overview = await api("/api/v1/overview");
+  renderSidebar();
+}
+
+async function bootstrap() {
+  try {
+    await api("/api/v1/auth/me");
+    showApp();
+    await reloadOverview();
+    await navigate("home");
+  } catch {
+    showLogin();
+  }
+}
+
+bootstrap();
+</script>
+</body>
+</html>

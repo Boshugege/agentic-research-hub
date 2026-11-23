@@ -1,0 +1,7 @@
+.env
+research-vault/
+research-blobs/
+service-state/
+__pycache__/
+*.pyc
+.pytest_cache/

@@ -1,0 +1,9 @@
+[Unit]
+Description=Push private research vault to GitHub mirror
+After=git-autosync.service
+
+[Service]
+Type=oneshot
+Environment=VAULT_PATH=%h/research-vault
+Environment=MIRROR_REMOTE=github
+ExecStart=%h/.local/bin/research-vault-mirror

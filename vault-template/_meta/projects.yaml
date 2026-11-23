@@ -1,0 +1,10 @@
+projects:
+  footstep-viz:
+    name: "脚步识别与可视化"
+    status: active
+  agent-deception:
+    name: "Agent Deception"
+    status: active
+  misc:
+    name: "杂项与灵感"
+    status: active

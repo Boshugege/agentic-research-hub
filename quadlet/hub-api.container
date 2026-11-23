@@ -1,0 +1,38 @@
+[Unit]
+Description=Agentic Research Hub (Web Workbench + MCP/REST API)
+After=network-online.target research-net-network.service forgejo.service
+Wants=network-online.target
+Requires=research-net-network.service forgejo.service
+
+[Container]
+UserNS=keep-id
+ContainerName=hub-api
+Image=ghcr.io/example/agentic-research-hub/hub-api:latest
+Network=research-net.network
+NetworkAlias=hub-api
+EnvironmentFile=%h/.config/agentic-research-hub/research.env
+Environment=VAULT_PATH=/vault
+Environment=BLOBS_PATH=/blobs
+Environment=STATE_PATH=/state
+Environment=FORGEJO_URL=http://forgejo:3000
+Volume=%h/research-vault:/vault
+Volume=%h/research-blobs:/blobs
+Volume=%h/research-state/hub-api:/state
+PublishPort=127.0.0.1:18081:8000
+PublishPort=127.0.0.1:18083:8000
+HealthCmd=/usr/bin/wget -q -O - http://127.0.0.1:8000/healthz
+HealthInterval=30s
+HealthTimeout=5s
+HealthRetries=3
+HealthStartPeriod=20s
+HealthOnFailure=restart
+LogDriver=journald
+
+[Service]
+Restart=always
+RestartSec=10
+TimeoutStartSec=180
+TimeoutStopSec=60
+
+[Install]
+WantedBy=default.target

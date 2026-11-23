@@ -1,0 +1,11 @@
+[Unit]
+Description=Push private research vault to GitHub mirror timer
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+Persistent=true
+Unit=research-vault-github-mirror.service
+
+[Install]
+WantedBy=timers.target

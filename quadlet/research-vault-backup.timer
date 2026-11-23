@@ -1,0 +1,10 @@
+[Unit]
+Description=Research vault and blob snapshot timer
+
+[Timer]
+OnCalendar=*-*-* 04:00:00
+Persistent=true
+Unit=research-vault-backup.service
+
+[Install]
+WantedBy=timers.target
