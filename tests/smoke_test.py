@@ -58,17 +58,35 @@ with tempfile.TemporaryDirectory() as td:
     assert r.status_code == 200 and r.json()["created"] is True, r.text
     assert (vault / "projects/new-sensor-lab/LIVING_DOC.md").exists()
 
-    # 2. Append timeline note & edit note in place
+    # 2. Append timeline note with historical event_date & edit note in place
     r = client.post(
         "/api/v1/timeline",
         headers=headers,
-        json={"project": "new-sensor-lab", "title": "Initial Calibration", "content": "SNR improved by 4dB.", "tags": ["exp"]},
+        json={
+            "project": "new-sensor-lab",
+            "title": "Initial Calibration",
+            "content": "SNR improved by 4dB.",
+            "event_date": "2026-10-29",
+            "tags": ["exp"],
+            "status": "final",
+        },
     )
     assert r.status_code == 200, r.text
     note_path = r.json()["path"]
+    assert "timeline/2026-10/2026-10-29_" in note_path, note_path
 
     r = client.get("/api/v1/projects/new-sensor-lab/timeline", headers=headers, params={"include_content": True})
-    assert r.status_code == 200 and r.json()["count"] == 1 and "SNR improved" in r.json()["items"][0]["body"], r.text
+    assert r.status_code == 200 and r.json()["count"] == 1 and r.json()["items"][0]["created_at"].startswith("2026-10-29"), r.text
+
+    # 2b. Patch LIVING_DOC without frontmatter must preserve YAML frontmatter
+    r = client.post(
+        "/api/v1/living-doc",
+        headers=headers,
+        json={"project": "new-sensor-lab", "summary": "full rewrite", "patch": "# New Sensor Lab\n\n## 1. Executive Summary\n\nBody\n\n## 3. Key Findings\n\nInitial\n", "actor": "agent:sensor"},
+    )
+    assert r.status_code == 200, r.text
+    ctx_after = client.get("/api/v1/projects/new-sensor-lab/context", headers=headers).json()
+    assert ctx_after["living_frontmatter"].get("project") == "new-sensor-lab" and ctx_after["living_frontmatter"].get("author") == "agent:sensor", ctx_after
 
     r = client.put("/api/v1/notes", headers=headers, json={"path": note_path, "content": (vault / note_path).read_text() + "\nVerified.\n"})
     assert r.status_code == 200, r.text

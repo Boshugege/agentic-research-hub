@@ -289,10 +289,29 @@ class CreateProjectRequest(BaseModel):
     actor: str = Field(default="agent:hub-api", description="Agent or human actor identifier")
 
 
+def parse_event_datetime(value: Optional[str]) -> datetime:
+    if not value or not value.strip():
+        return now()
+    raw = value.strip()
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw):
+        return datetime.strptime(raw, "%Y-%m-%d").replace(hour=12, minute=0, second=0, tzinfo=UTC8)
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}", raw):
+        return datetime.strptime(raw.replace("T", " "), "%Y-%m-%d %H:%M").replace(tzinfo=UTC8)
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC8)
+        return dt.astimezone(UTC8)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"invalid event_date format: {value} (use YYYY-MM-DD or ISO-8601)") from exc
+
+
 class TimelineRequest(BaseModel):
     project: str
     title: str
     content: str
+    event_date: Optional[str] = Field(default=None, description="Actual event date/time (YYYY-MM-DD or ISO-8601). Defaults to now.")
+    created_at: Optional[str] = Field(default=None, description="Alias for event_date")
     tags: list[str] = Field(default_factory=list)
     author: str = "agent:hub-api"
     status: str = "draft"
@@ -474,14 +493,16 @@ def _collect_timeline_items(slug: str, include_content: bool = False) -> list[di
             text = path.read_text(errors="ignore")
             meta = parse_frontmatter(text)
             body = strip_frontmatter(text)
-            created = str(meta.get("created_at") or "")
+            created = str(meta.get("event_date") or meta.get("created_at") or "")
             sort_key = created or path.name
             entry: dict[str, Any] = {
                 "sort_key": sort_key,
                 "project": slug,
                 "path": str(path.relative_to(VAULT)),
                 "title": meta.get("title") or path.stem,
+                "event_date": created or datetime.fromtimestamp(path.stat().st_mtime, UTC8).isoformat(timespec="seconds"),
                 "created_at": created or datetime.fromtimestamp(path.stat().st_mtime, UTC8).isoformat(timespec="seconds"),
+                "recorded_at": str(meta.get("recorded_at") or ""),
                 "updated_at": meta.get("updated_at") or created,
                 "author": meta.get("author") or "unknown",
                 "status": meta.get("status") or "draft",
@@ -677,7 +698,9 @@ def update_note(request: UpdateNoteRequest) -> dict[str, Any]:
 @app.post("/api/v1/timeline", dependencies=[Depends(auth)])
 def append_timeline_note(request: TimelineRequest) -> dict[str, str]:
     root = project_path(request.project)
-    ts = now()
+    recorded_iso = iso()
+    ts = parse_event_datetime(request.event_date or request.created_at)
+    event_iso = ts.isoformat(timespec="seconds")
     stamp = ts.strftime("%Y-%m-%d_%H%M")
     slug_title = safe_name(request.title)
     note_id = ts.strftime("%Y%m%d-%H%M") + "-" + slug_title
@@ -696,8 +719,10 @@ def append_timeline_note(request: TimelineRequest) -> dict[str, str]:
             "project": request.project,
             "type": "timeline",
             "title": request.title,
-            "created_at": iso(),
-            "updated_at": iso(),
+            "event_date": event_iso,
+            "created_at": event_iso,
+            "recorded_at": recorded_iso,
+            "updated_at": recorded_iso,
             "author": request.author,
             "status": request.status,
             "tags": request.tags,
@@ -707,7 +732,7 @@ def append_timeline_note(request: TimelineRequest) -> dict[str, str]:
         path.write_text(frontmatter(metadata) + f"\n# {request.title}\n\n{request.content.strip()}\n")
         rel = str(path.relative_to(VAULT))
         sha = commit(f"log({request.project}): append {request.title}", request.author, [rel])
-    return {"path": rel, "commit": sha}
+    return {"path": rel, "commit": sha, "event_date": event_iso}
 
 
 def _replace_section(original: str, section: str, new_body: str) -> str:
@@ -745,8 +770,22 @@ def update_living_doc(request: LivingDocRequest) -> dict[str, Any]:
                 run_git("switch", "-c", branch)
 
             original = path.read_text() if path.exists() else ""
+            orig_meta = parse_frontmatter(original)
             if request.patch is not None:
                 updated = request.patch
+                if not updated.startswith("---"):
+                    proj_cfg = projects().get(request.project, {})
+                    preserved_meta = {
+                        "id": orig_meta.get("id") or f"{request.project}-living-doc",
+                        "project": request.project,
+                        "type": "living_doc",
+                        "title": orig_meta.get("title") or (proj_cfg.get("name") if isinstance(proj_cfg, dict) else request.project) or request.project,
+                        "updated_at": iso(),
+                        "author": request.actor,
+                        "status": orig_meta.get("status") or "active",
+                        "tags": orig_meta.get("tags") or [],
+                    }
+                    updated = frontmatter(preserved_meta) + "\n" + updated.lstrip("\n")
             elif request.section:
                 updated = _replace_section(original, request.section, request.summary)
             else:
@@ -992,7 +1031,7 @@ MCP_TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "append_timeline_note",
-        "description": "Append a new timestamped timeline note under projects/<project>/timeline/YYYY-MM/ and auto-commit to Git.",
+        "description": "Append a new timestamped timeline note under projects/<project>/timeline/YYYY-MM/ and auto-commit to Git. Pass event_date (YYYY-MM-DD or ISO-8601) when backfilling historical notes so timeline ordering matches actual event dates.",
         "inputSchema": {
             "type": "object",
             "required": ["project", "title", "content"],
@@ -1000,9 +1039,10 @@ MCP_TOOLS: list[dict[str, Any]] = [
                 "project": {"type": "string", "description": "Registered project slug"},
                 "title": {"type": "string", "description": "Concise title of this timeline entry"},
                 "content": {"type": "string", "description": "Markdown body of the note"},
+                "event_date": {"type": "string", "description": "Actual event date/time (e.g. '2026-10-29' or '2026-11-21T15:00:00+08:00'). Defaults to current time."},
                 "tags": {"type": "array", "items": {"type": "string"}, "default": []},
                 "author": {"type": "string", "default": "agent:hub-api"},
-                "status": {"type": "string", "default": "draft", "enum": ["draft", "verified", "distilled", "archived"]},
+                "status": {"type": "string", "default": "draft", "enum": ["draft", "verified", "final", "distilled", "archived"]},
                 "artifacts": {"type": "array", "items": {"type": "string"}, "default": []},
             },
         },

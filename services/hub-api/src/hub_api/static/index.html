@@ -1099,9 +1099,10 @@ function openNewTimelineModal(defaultSlug) {
     `<option value="${esc(p.slug)}" ${p.slug === defaultSlug ? "selected" : ""}>${esc(p.name || p.slug)} (${esc(p.slug)})</option>`
   ).join("");
   openModal("新增时间线笔记", `
-    <div style="display:grid;grid-template-columns:1fr 140px;gap:12px;">
+    <div style="display:grid;grid-template-columns:1fr 160px 120px;gap:10px;">
       <div class="field"><label>所属项目</label><select class="select" id="nt-proj">${options}</select></div>
-      <div class="field"><label>状态</label><select class="select" id="nt-status"><option value="draft">draft</option><option value="verified">verified</option></select></div>
+      <div class="field"><label>事件日期（留空=现在）</label><input class="input" id="nt-date" placeholder="YYYY-MM-DD" /></div>
+      <div class="field"><label>状态</label><select class="select" id="nt-status"><option value="draft">draft</option><option value="verified">verified</option><option value="final">final</option></select></div>
     </div>
     <div class="field"><label>标题</label><input class="input" id="nt-title" placeholder="例如：传感器滤波实验结果分析" /></div>
     <div class="field"><label>标签（逗号分隔，可选）</label><input class="input" id="nt-tags" placeholder="experiment, pipeline, bugfix" /></div>
@@ -1115,13 +1116,14 @@ function openNewTimelineModal(defaultSlug) {
     const project = document.getElementById("nt-proj").value;
     const title = document.getElementById("nt-title").value.trim();
     const content = document.getElementById("nt-content").value.trim();
+    const event_date = document.getElementById("nt-date").value.trim() || null;
     const status = document.getElementById("nt-status").value;
     const tags = document.getElementById("nt-tags").value.split(",").map(s => s.trim()).filter(Boolean);
     if (!title || !content) return toast("请填写标题和正文");
     try {
       const res = await api("/api/v1/timeline", {
         method: "POST",
-        body: JSON.stringify({ project, title, content, tags, status, author: "human" }),
+        body: JSON.stringify({ project, title, content, event_date, tags, status, author: "human" }),
       });
       closeModal();
       toast(`已写入时间线 (${res.commit.slice(0, 7)})`);
