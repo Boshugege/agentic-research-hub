@@ -34,6 +34,8 @@ For how to instruct and maintain the note-taking agents themselves, see [agent-p
 - A `section` update with a stale `base_commit` still succeeds when nobody else changed that section, and gets `409` when someone did.
 - Every successful update returns `commit`, which is the next `living_commit`.
 
+To correct the kind, thread, or links of an existing note without touching its body, use `scripts/annotate-note.py <path> --kind … --thread … [--follows a,b] [--supersedes c]`; it edits only those frontmatter keys and verifies the body is unchanged.
+
 A note stops being "undistilled" once an update lists it in `source_notes` or the document links to it with `[[path|label]]`.
 
 For `mode=pr`, set private `FORGEJO_TOKEN`, `FORGEJO_OWNER`, and `FORGEJO_GIT_REMOTE` environment variables. The API pushes the PR branch, opens the Forgejo pull request against `main`, and immediately switches the shared working tree back to `main`.
