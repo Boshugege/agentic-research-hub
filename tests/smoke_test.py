@@ -150,10 +150,42 @@ with tempfile.TemporaryDirectory() as td:
     r = client.post("/api/v1/search", headers=headers, json={"query": "Calibration", "project": "new-sensor-lab"})
     assert r.status_code == 200 and r.json()["results"], r.text
 
+    # 3d. Note kinds, threads, follows / supersedes
+    def add_note(**fields):
+        res = client.post("/api/v1/timeline", headers=headers, json={"project": "new-sensor-lab", "content": "body", **fields})
+        assert res.status_code == 200, res.text
+        return res.json()
+
+    idea = add_note(title="Try Kalman filter", kind="idea", thread="Filter Design", event_date="2026-11-01")
+    assert idea["thread"] == "filter-design" and idea["kind"] == "idea", idea
+    result = add_note(title="Kalman drifts", kind="negative", thread="filter-design", event_date="2026-11-03", follows=[idea["path"]])
+    decision = add_note(title="Switch to complementary filter", kind="decision", thread="filter-design", event_date="2026-11-05",
+                        follows=[result["path"].removesuffix(".md")], supersedes=[idea["path"]])
+    assert client.post("/api/v1/timeline", headers=headers, json={"project": "new-sensor-lab", "title": "x", "content": "y", "kind": "bogus"}).status_code == 400
+    r = client.post("/api/v1/timeline", headers=headers, json={"project": "new-sensor-lab", "title": "x", "content": "y", "follows": ["projects/new-sensor-lab/timeline/nope.md"]})
+    assert r.status_code == 400 and "note not found" in r.text, r.text
+
+    r = client.get("/api/v1/projects/new-sensor-lab/timeline", headers=headers, params={"thread": "filter-design", "order": "asc"})
+    thread_items = r.json()["items"]
+    assert [i["kind"] for i in thread_items] == ["idea", "negative", "decision"], thread_items
+    assert thread_items[0]["superseded_by"] == [decision["path"]] and thread_items[2]["follows"] == [result["path"]], thread_items
+    r = client.get("/api/v1/projects/new-sensor-lab/timeline", headers=headers, params={"kind": "decision"})
+    assert [i["path"] for i in r.json()["items"]] == [decision["path"]], r.text
+
+    threads = client.get("/api/v1/projects/new-sensor-lab/threads", headers=headers).json()
+    assert threads["threads"][0]["thread"] == "filter-design" and threads["threads"][0]["count"] == 3, threads
+    assert threads["threads"][0]["latest_kind"] == "decision" and threads["threads"][0]["first_at"].startswith("2026-11-01"), threads
+    assert client.get("/api/v1/projects/new-sensor-lab/context", headers=headers).json()["threads"][0]["thread"] == "filter-design"
+    r = client.post("/api/v1/search", headers=headers, json={"query": "body", "project": "new-sensor-lab", "kind": "negative"})
+    assert {x["path"] for x in r.json()["results"]} == {result["path"]}, r.text
+
     # 4. Standards-compliant MCP handshake + tools/list + tools/call
     r = client.post("/mcp", headers=headers, json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05"}})
     assert r.status_code == 200 and r.json()["result"]["serverInfo"]["name"] == "agentic-research-hub", r.text
     r = client.post("/mcp", headers=headers, json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
-    assert len(r.json()["result"]["tools"]) == 12
+    tool_names = [t["name"] for t in r.json()["result"]["tools"]]
+    assert len(tool_names) == 13 and "list_threads" in tool_names, tool_names
+    r = client.post("/mcp", headers=headers, json={"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "list_threads", "arguments": {"project": "new-sensor-lab"}}})
+    assert r.json()["result"]["isError"] is False and "filter-design" in r.json()["result"]["content"][0]["text"], r.text
 
 print("all smoke tests passed")

@@ -42,6 +42,7 @@ FORGEJO_REPO = os.getenv("FORGEJO_REPO", "research-vault")
 FORGEJO_GIT_REMOTE = os.getenv("FORGEJO_GIT_REMOTE", "")
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
+NOTE_KINDS = ("note", "idea", "plan", "result", "negative", "decision", "meeting")
 LOCK = threading.RLock()
 LOGIN_FAILURES: dict[str, list[float]] = defaultdict(list)
 
@@ -225,6 +226,30 @@ def note_event_datetime(meta: dict[str, Any], path: Path) -> datetime:
     return datetime.fromtimestamp(path.stat().st_mtime, UTC8)
 
 
+def normalize_thread(value: Optional[str]) -> Optional[str]:
+    """Thread IDs are short kebab-case labels shared by notes on one line of thought."""
+    if not value or not value.strip():
+        return None
+    cleaned = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "-", value.strip().lower()).strip("-")
+    if not cleaned:
+        raise HTTPException(status_code=400, detail=f"invalid thread: {value}")
+    return cleaned[:64]
+
+
+def resolve_note_refs(refs: list[str], field: str) -> list[str]:
+    """Validate note references (with or without .md) and return vault-relative paths."""
+    resolved = []
+    for raw in refs:
+        ref = raw.strip()
+        if not ref:
+            continue
+        target = resolve_note(ref if ref.endswith(".md") else f"{ref}.md")
+        if not target.is_file():
+            raise HTTPException(status_code=400, detail=f"{field}: note not found: {raw}")
+        resolved.append(str(target.relative_to(VAULT.resolve())))
+    return resolved
+
+
 def safe_name(value: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._\-\u4e00-\u9fff]+", "-", value).strip("-")
     return cleaned[:80] or "note"
@@ -344,6 +369,10 @@ class TimelineRequest(BaseModel):
     content: str
     event_date: Optional[str] = Field(default=None, description="Actual event date/time (YYYY-MM-DD or ISO-8601). Defaults to now.")
     created_at: Optional[str] = Field(default=None, description="Alias for event_date")
+    kind: str = Field(default="note", description="note | idea | plan | result | negative | decision | meeting")
+    thread: Optional[str] = Field(default=None, description="Line-of-thought ID shared by related notes")
+    follows: list[str] = Field(default_factory=list, description="Paths of earlier notes this one builds on")
+    supersedes: list[str] = Field(default_factory=list, description="Paths of earlier notes this one overturns")
     tags: list[str] = Field(default_factory=list)
     author: str = "agent:hub-api"
     status: str = "draft"
@@ -378,6 +407,8 @@ class SearchRequest(BaseModel):
     query: str
     project: Optional[str] = None
     type: Optional[str] = None
+    kind: Optional[str] = None
+    thread: Optional[str] = None
     limit: int = 20
 
 
@@ -517,7 +548,7 @@ def stack_health() -> dict[str, Any]:
 
 # -------------------- Projects & Overview --------------------
 
-def _collect_timeline_items(slug: str, include_content: bool = False) -> list[dict[str, Any]]:
+def _collect_timeline_items(slug: str, include_content: bool = False, keep_sort_key: bool = False) -> list[dict[str, Any]]:
     root = VAULT / "projects" / slug
     items: list[dict[str, Any]] = []
     if (root / "timeline").exists():
@@ -526,9 +557,8 @@ def _collect_timeline_items(slug: str, include_content: bool = False) -> list[di
             meta = parse_frontmatter(text)
             body = strip_frontmatter(text)
             created = str(meta.get("event_date") or meta.get("created_at") or "")
-            sort_key = created or path.name
             entry: dict[str, Any] = {
-                "sort_key": sort_key,
+                "sort_key": note_event_datetime(meta, path),
                 "project": slug,
                 "path": str(path.relative_to(VAULT)),
                 "title": meta.get("title") or path.stem,
@@ -538,6 +568,11 @@ def _collect_timeline_items(slug: str, include_content: bool = False) -> list[di
                 "updated_at": meta.get("updated_at") or created,
                 "author": meta.get("author") or "unknown",
                 "status": meta.get("status") or "draft",
+                "kind": meta.get("kind") if meta.get("kind") in NOTE_KINDS else "note",
+                "thread": meta.get("thread") or None,
+                "follows": meta.get("follows") or [],
+                "supersedes": meta.get("supersedes") or [],
+                "superseded_by": [],
                 "tags": meta.get("tags") or [],
                 "artifacts": meta.get("artifacts") or [],
             }
@@ -549,9 +584,37 @@ def _collect_timeline_items(slug: str, include_content: bool = False) -> list[di
                 entry["excerpt"] = " ".join(preview_lines)[:220]
             items.append(entry)
     items.sort(key=lambda item: item["sort_key"], reverse=True)
+    by_path = {item["path"]: item for item in items}
     for item in items:
-        item.pop("sort_key", None)
+        if not keep_sort_key:
+            item.pop("sort_key", None)
+        for old in item["supersedes"]:
+            if old in by_path:
+                by_path[old]["superseded_by"].append(item["path"])
     return items
+
+
+def _thread_summaries(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Summarise threads from newest-first timeline items, most recently active first."""
+    threads: dict[str, dict[str, Any]] = {}
+    for item in items:
+        name = item.get("thread")
+        if not name:
+            continue
+        summary = threads.setdefault(name, {
+            "thread": name,
+            "count": 0,
+            "kinds": {},
+            "latest_at": item["event_date"],
+            "latest_title": item["title"],
+            "latest_kind": item["kind"],
+            "latest_path": item["path"],
+            "first_at": item["event_date"],
+        })
+        summary["count"] += 1
+        summary["kinds"][item["kind"]] = summary["kinds"].get(item["kind"], 0) + 1
+        summary["first_at"] = item["event_date"]
+    return list(threads.values())
 
 
 @app.get("/api/v1/overview", dependencies=[Depends(auth)])
@@ -665,10 +728,39 @@ def create_project(request: CreateProjectRequest) -> dict[str, Any]:
 
 
 @app.get("/api/v1/projects/{project}/timeline", dependencies=[Depends(auth)])
-def list_timeline(project: str, limit: int = 50, include_content: bool = False) -> dict[str, Any]:
+def list_timeline(
+    project: str,
+    limit: int = 50,
+    include_content: bool = False,
+    kind: Optional[str] = None,
+    thread: Optional[str] = None,
+    order: str = "desc",
+) -> dict[str, Any]:
     project_path(project)
+    if kind and kind not in NOTE_KINDS:
+        raise HTTPException(status_code=400, detail=f"kind must be one of: {', '.join(NOTE_KINDS)}")
+    if order not in {"asc", "desc"}:
+        raise HTTPException(status_code=400, detail="order must be asc or desc")
     items = _collect_timeline_items(project, include_content=include_content)
+    wanted_thread = normalize_thread(thread)
+    if kind:
+        items = [item for item in items if item["kind"] == kind]
+    if wanted_thread:
+        items = [item for item in items if item["thread"] == wanted_thread]
+    if order == "asc":
+        items.reverse()
     return {"project": project, "count": len(items), "items": items[:limit]}
+
+
+@app.get("/api/v1/projects/{project}/threads", dependencies=[Depends(auth)])
+def list_threads(project: str) -> dict[str, Any]:
+    project_path(project)
+    items = _collect_timeline_items(project)
+    return {
+        "project": project,
+        "threads": _thread_summaries(items),
+        "unthreaded_count": sum(1 for item in items if not item["thread"]),
+    }
 
 
 @app.get("/api/v1/projects/{project}/context", dependencies=[Depends(auth)])
@@ -692,6 +784,7 @@ def get_project_context(project: str, recent_days: int = 14, include_lit: bool =
         "living_frontmatter": parse_frontmatter(living),
         "living_body": strip_frontmatter(living),
         "timeline": timeline,
+        "threads": _thread_summaries(_collect_timeline_items(project)),
         "literature": literature,
     }
 
@@ -728,8 +821,13 @@ def update_note(request: UpdateNoteRequest) -> dict[str, Any]:
 
 
 @app.post("/api/v1/timeline", dependencies=[Depends(auth)])
-def append_timeline_note(request: TimelineRequest) -> dict[str, str]:
+def append_timeline_note(request: TimelineRequest) -> dict[str, Any]:
     root = project_path(request.project)
+    if request.kind not in NOTE_KINDS:
+        raise HTTPException(status_code=400, detail=f"kind must be one of: {', '.join(NOTE_KINDS)}")
+    thread = normalize_thread(request.thread)
+    follows = resolve_note_refs(request.follows, "follows")
+    supersedes = resolve_note_refs(request.supersedes, "supersedes")
     recorded_iso = iso()
     ts = parse_event_datetime(request.event_date or request.created_at)
     event_iso = ts.isoformat(timespec="seconds")
@@ -750,6 +848,7 @@ def append_timeline_note(request: TimelineRequest) -> dict[str, str]:
             "id": note_id,
             "project": request.project,
             "type": "timeline",
+            "kind": request.kind,
             "title": request.title,
             "event_date": event_iso,
             "created_at": event_iso,
@@ -761,10 +860,16 @@ def append_timeline_note(request: TimelineRequest) -> dict[str, str]:
             "artifacts": request.artifacts,
             "distilled_into_commit": None,
         }
+        if thread:
+            metadata["thread"] = thread
+        if follows:
+            metadata["follows"] = follows
+        if supersedes:
+            metadata["supersedes"] = supersedes
         path.write_text(frontmatter(metadata) + f"\n# {request.title}\n\n{request.content.strip()}\n")
         rel = str(path.relative_to(VAULT))
         sha = commit(f"log({request.project}): append {request.title}", request.author, [rel])
-    return {"path": rel, "commit": sha, "event_date": event_iso}
+    return {"path": rel, "commit": sha, "event_date": event_iso, "kind": request.kind, "thread": thread}
 
 
 def _replace_section(original: str, section: str, new_body: str) -> str:
@@ -968,6 +1073,10 @@ def search_knowledge(request: SearchRequest) -> dict[str, Any]:
         metadata = parse_frontmatter(text)
         if request.type and metadata.get("type") != request.type:
             continue
+        if request.kind and metadata.get("kind") != request.kind:
+            continue
+        if request.thread and metadata.get("thread") != normalize_thread(request.thread):
+            continue
         for line_no, line in enumerate(text.splitlines(), 1):
             if query in line.lower():
                 results.append({"path": str(path.relative_to(VAULT)), "line": line_no, "snippet": line.strip(), "frontmatter": metadata})
@@ -1062,12 +1171,27 @@ MCP_TOOLS: list[dict[str, Any]] = [
             "properties": {
                 "project": {"type": "string", "description": "Project slug"},
                 "limit": {"type": "integer", "default": 30},
+                "kind": {"type": "string", "enum": list(NOTE_KINDS), "description": "Only notes of this kind"},
+                "thread": {"type": "string", "description": "Only notes on this thread"},
+                "order": {"type": "string", "enum": ["desc", "asc"], "default": "desc", "description": "Use 'asc' to read a thread from its beginning"},
+                "include_content": {"type": "boolean", "default": False},
+            },
+        },
+    },
+    {
+        "name": "list_threads",
+        "description": "List a project's lines of thought (threads): note count, kinds, first/latest activity. Call this before appending a note so you reuse an existing thread ID instead of inventing a near-duplicate.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["project"],
+            "properties": {
+                "project": {"type": "string", "description": "Project slug"},
             },
         },
     },
     {
         "name": "append_timeline_note",
-        "description": "Append a new timestamped timeline note under projects/<project>/timeline/YYYY-MM/ and auto-commit to Git. Pass event_date (YYYY-MM-DD or ISO-8601) when backfilling historical notes so timeline ordering matches actual event dates.",
+        "description": "Append a new timestamped timeline note under projects/<project>/timeline/YYYY-MM/ and auto-commit to Git. One note = one event. Set kind (decision / result / negative / plan / idea / meeting) and thread so the reasoning can be followed later; link earlier notes with follows, and use supersedes when this note overturns an earlier conclusion. Pass event_date (YYYY-MM-DD or ISO-8601) when backfilling historical notes so timeline ordering matches actual event dates.",
         "inputSchema": {
             "type": "object",
             "required": ["project", "title", "content"],
@@ -1076,6 +1200,10 @@ MCP_TOOLS: list[dict[str, Any]] = [
                 "title": {"type": "string", "description": "Concise title of this timeline entry"},
                 "content": {"type": "string", "description": "Markdown body of the note"},
                 "event_date": {"type": "string", "description": "Actual event date/time (e.g. '2026-10-29' or '2026-11-21T15:00:00+08:00'). Defaults to current time."},
+                "kind": {"type": "string", "enum": list(NOTE_KINDS), "default": "note", "description": "idea = hypothesis or proposal; plan = what will be tried; result = measured outcome; negative = dead end or abandoned route; decision = a choice and its reason; meeting = discussion record; note = anything else"},
+                "thread": {"type": "string", "description": "Line-of-thought ID in kebab-case, e.g. 'bem-solver'. Reuse an ID from list_threads when the note continues existing work."},
+                "follows": {"type": "array", "items": {"type": "string"}, "default": [], "description": "Vault paths of earlier notes this one builds on"},
+                "supersedes": {"type": "array", "items": {"type": "string"}, "default": [], "description": "Vault paths of earlier notes whose conclusion this one overturns"},
                 "tags": {"type": "array", "items": {"type": "string"}, "default": []},
                 "author": {"type": "string", "default": "agent:hub-api"},
                 "status": {"type": "string", "default": "draft", "enum": ["draft", "verified", "final", "distilled", "archived"]},
@@ -1147,6 +1275,8 @@ MCP_TOOLS: list[dict[str, Any]] = [
                 "query": {"type": "string"},
                 "project": {"type": "string"},
                 "type": {"type": "string", "enum": ["living_doc", "timeline", "literature", "raw_log"]},
+                "kind": {"type": "string", "enum": list(NOTE_KINDS)},
+                "thread": {"type": "string"},
                 "limit": {"type": "integer", "default": 10},
             },
         },
@@ -1228,6 +1358,8 @@ def mcp(request: dict[str, Any]) -> Any:
                 result = get_project_context(**arguments)
             elif name == "list_timeline":
                 result = list_timeline(**arguments)
+            elif name == "list_threads":
+                result = list_threads(**arguments)
             elif name == "append_timeline_note":
                 result = append_timeline_note(TimelineRequest.model_validate(arguments))
             elif name == "update_living_doc":
