@@ -4,6 +4,7 @@ After=git-autosync.service
 
 [Service]
 Type=oneshot
+EnvironmentFile=-%h/.config/agentic-research-hub/research.env
 Environment=VAULT_PATH=%h/research-vault
 Environment=MIRROR_REMOTE=github
 ExecStart=%h/.local/bin/research-vault-mirror

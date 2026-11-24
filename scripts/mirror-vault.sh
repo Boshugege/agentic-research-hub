@@ -5,9 +5,11 @@ REMOTE=${MIRROR_REMOTE:-github}
 ASKPASS=$(mktemp)
 cleanup() { rm -f "$ASKPASS"; }
 trap cleanup EXIT
-cat > "$ASKPASS" <<'ASKPASS_SCRIPT'
+cat > "$ASKPASS" <<ASKPASS_SCRIPT
 #!/usr/bin/env bash
-case "$1" in
+export HTTP_PROXY="${MIRROR_HTTP_PROXY:-}"
+export HTTPS_PROXY="${MIRROR_HTTP_PROXY:-}"
+case "\$1" in
   *Username*) printf '%s\n' 'x-oauth-basic' ;;
   *Password*) gh auth token ;;
   *) printf '\n' ;;
