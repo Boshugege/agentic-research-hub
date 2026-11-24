@@ -392,6 +392,7 @@ class LivingDocRequest(BaseModel):
     section: Optional[str] = None
     patch: Optional[str] = None
     source_notes: list[str] = Field(default_factory=list)
+    base_commit: Optional[str] = Field(default=None, description="Commit at which the caller read LIVING_DOC.md")
     mode: str = "direct"
     actor: str = "agent:hub-api"
 
@@ -781,6 +782,7 @@ def get_project_context(project: str, recent_days: int = 14, include_lit: bool =
         "project": project,
         "meta": projects().get(project, {}),
         "living_doc": living,
+        "living_commit": _living_head_commit(f"projects/{project}/LIVING_DOC.md") or None,
         "living_frontmatter": parse_frontmatter(living),
         "living_body": strip_frontmatter(living),
         "timeline": timeline,
@@ -872,21 +874,79 @@ def append_timeline_note(request: TimelineRequest) -> dict[str, Any]:
     return {"path": rel, "commit": sha, "event_date": event_iso, "kind": request.kind, "thread": thread}
 
 
+def _find_section(text: str, section: str) -> Optional[tuple[int, int, int]]:
+    """Locate an H2 section; returns (header_start, header_end, section_end)."""
+    match = re.search(rf"^## {re.escape(section)}[^\n]*$", text, re.MULTILINE)
+    if not match:
+        match = re.search(rf"^## [^\n]*{re.escape(section)}[^\n]*$", text, re.MULTILINE | re.IGNORECASE)
+    if not match:
+        return None
+    next_match = re.search(r"\n## ", text[match.end():])
+    end = match.end() + next_match.start() if next_match else len(text)
+    return match.start(), match.end(), end
+
+
 def _replace_section(original: str, section: str, new_body: str) -> str:
-    exact_marker = f"## {section}"
-    start = original.find(exact_marker)
-    matched_header = exact_marker
-    if start == -1:
-        pattern = re.compile(rf"^## [^\n]*{re.escape(section)}[^\n]*$", re.MULTILINE | re.IGNORECASE)
-        match = pattern.search(original)
-        if not match:
-            raise HTTPException(status_code=400, detail=f"section not found: {section}")
-        start = match.start()
-        matched_header = match.group(0)
-    header_end = start + len(matched_header)
-    next_match = re.search(r"\n## ", original[header_end:])
-    end = header_end + next_match.start() if next_match else len(original)
-    return original[:start] + matched_header + "\n\n" + new_body.strip() + "\n" + original[end:]
+    found = _find_section(original, section)
+    if not found:
+        raise HTTPException(status_code=400, detail=f"section not found: {section}")
+    start, header_end, end = found
+    return original[:header_end] + "\n\n" + new_body.strip() + "\n" + original[end:]
+
+
+def _section_body(text: str, section: str) -> Optional[str]:
+    found = _find_section(text, section)
+    return text[found[1]:found[2]].strip() if found else None
+
+
+def _living_head_commit(rel: str) -> str:
+    """Latest commit on main that touched the document ('' if never committed)."""
+    return run_git("log", "-1", "--format=%H", "main", "--", rel, check=False)
+
+
+def _changed_since(base: str, rel: str) -> bool:
+    try:
+        return int(run_git("rev-list", "--count", f"{base}..main", "--", rel)) > 0
+    except (RuntimeError, ValueError):
+        return True
+
+
+def _check_living_base(request: LivingDocRequest, rel: str, original: str) -> None:
+    """Refuse updates built on a stale read of LIVING_DOC.md (optimistic concurrency).
+
+    Whole-document replacement must name the commit it was read at. Section
+    updates may be stale as long as nobody else changed that same section.
+    """
+    base = (request.base_commit or "").strip().lower()
+    if base and not SHA_RE.match(base):
+        raise HTTPException(status_code=400, detail="invalid base_commit")
+    head = _living_head_commit(rel)
+    if not head:
+        return
+    if request.patch is not None and not base:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "base_commit is required when replacing the whole LIVING_DOC.md: read the document first "
+                f"(get_project_context returns living_commit, currently {head[:12]}) and pass that value, "
+                "or update a single section with `section` instead."
+            ),
+        )
+    if not base or not _changed_since(base, rel):
+        return
+    stale = HTTPException(
+        status_code=409,
+        detail=(
+            f"LIVING_DOC.md changed since {base[:12]} (now at {head[:12]}). "
+            "Re-read it, reapply your change on top, and retry with the new living_commit."
+        ),
+    )
+    if request.patch is not None:
+        raise stale
+    if request.section:
+        then = _section_body(run_git("show", f"{base}:{rel}", check=False), request.section)
+        if then is None or then != _section_body(original, request.section):
+            raise stale
 
 
 @app.post("/api/v1/living-doc", dependencies=[Depends(auth)])
@@ -900,13 +960,15 @@ def update_living_doc(request: LivingDocRequest) -> dict[str, Any]:
         if run_git("branch", "--show-current", check=False) != "main":
             run_git("switch", "main")
 
+        original = path.read_text() if path.exists() else ""
+        _check_living_base(request, str(path.relative_to(VAULT)), original)
+
         branch = None
         try:
             if request.mode == "pr":
                 branch = f"agent/{request.project}/{now().strftime('%Y%m%d%H%M%S')}"
                 run_git("switch", "-c", branch)
 
-            original = path.read_text() if path.exists() else ""
             orig_meta = parse_frontmatter(original)
             if request.patch is not None:
                 updated = request.patch
@@ -1213,7 +1275,7 @@ MCP_TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "update_living_doc",
-        "description": "Update a project's canonical LIVING_DOC.md (replace a section, replace full markdown via patch, or append summary) and commit via direct or Forgejo PR mode.",
+        "description": "Update a project's canonical LIVING_DOC.md and commit via direct or Forgejo PR mode. Prefer replacing one section (`section` + `summary`); other agents may be editing other sections. Replacing the whole document (`patch`) requires `base_commit` = the living_commit you got from get_project_context, and is rejected with a conflict if the document changed since. The returned `commit` is the new living_commit.",
         "inputSchema": {
             "type": "object",
             "required": ["project", "summary"],
@@ -1223,6 +1285,7 @@ MCP_TOOLS: list[dict[str, Any]] = [
                 "section": {"type": "string", "description": "Target H2 heading or substring, e.g. '1. Executive Summary'"},
                 "patch": {"type": "string", "description": "Optional full Markdown content replacing LIVING_DOC.md"},
                 "source_notes": {"type": "array", "items": {"type": "string"}, "default": [], "description": "Timeline note paths distilled into this update"},
+                "base_commit": {"type": "string", "description": "living_commit from get_project_context at the time you read the document. Required with patch; recommended with section."},
                 "mode": {"type": "string", "enum": ["direct", "pr"], "default": "direct"},
                 "actor": {"type": "string", "default": "agent:hub-api"},
             },

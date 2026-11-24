@@ -79,14 +79,31 @@ with tempfile.TemporaryDirectory() as td:
     assert r.status_code == 200 and r.json()["count"] == 1 and r.json()["items"][0]["created_at"].startswith("2026-10-29"), r.text
 
     # 2b. Patch LIVING_DOC without frontmatter must preserve YAML frontmatter
-    r = client.post(
-        "/api/v1/living-doc",
-        headers=headers,
-        json={"project": "new-sensor-lab", "summary": "full rewrite", "patch": "# New Sensor Lab\n\n## 1. Executive Summary\n\nBody\n\n## 3. Key Findings\n\nInitial\n", "actor": "agent:sensor"},
-    )
+    full_doc = "# New Sensor Lab\n\n## 1. Executive Summary\n\nBody\n\n## 3. Key Findings\n\nInitial\n"
+    patch_req = {"project": "new-sensor-lab", "summary": "full rewrite", "patch": full_doc, "actor": "agent:sensor"}
+    r = client.post("/api/v1/living-doc", headers=headers, json=patch_req)
+    assert r.status_code == 400 and "base_commit is required" in r.text, r.text
+    base0 = client.get("/api/v1/projects/new-sensor-lab/context", headers=headers).json()["living_commit"]
+    r = client.post("/api/v1/living-doc", headers=headers, json={**patch_req, "base_commit": base0})
     assert r.status_code == 200, r.text
+    base1 = r.json()["commit"]
     ctx_after = client.get("/api/v1/projects/new-sensor-lab/context", headers=headers).json()
+    assert ctx_after["living_commit"] == base1, ctx_after
     assert ctx_after["living_frontmatter"].get("project") == "new-sensor-lab" and ctx_after["living_frontmatter"].get("author") == "agent:sensor", ctx_after
+
+    # 2c. Optimistic concurrency: a stale whole-document patch is refused, and so is a
+    #     stale edit of a section someone else changed; untouched sections still merge.
+    r = client.post("/api/v1/living-doc", headers=headers, json={**patch_req, "base_commit": base0})
+    assert r.status_code == 409 and base1[:12] in r.text, r.text
+    r = client.post("/api/v1/living-doc", headers=headers, json={"project": "new-sensor-lab", "section": "Key Findings", "summary": "Agent B finding", "base_commit": base1, "actor": "agent:b"})
+    assert r.status_code == 200, r.text
+    r = client.post("/api/v1/living-doc", headers=headers, json={"project": "new-sensor-lab", "section": "Executive Summary", "summary": "Agent A summary", "base_commit": base1, "actor": "agent:a"})
+    assert r.status_code == 200, r.text
+    r = client.post("/api/v1/living-doc", headers=headers, json={"project": "new-sensor-lab", "section": "Key Findings", "summary": "Agent A stale overwrite", "base_commit": base1, "actor": "agent:a"})
+    assert r.status_code == 409, r.text
+    merged = (vault / "projects/new-sensor-lab/LIVING_DOC.md").read_text()
+    assert "Agent B finding" in merged and "Agent A summary" in merged and "stale overwrite" not in merged, merged
+    assert subprocess.check_output(["git", "-C", str(vault), "branch", "--list", "agent/*"], text=True).strip() == ""
 
     r = client.put("/api/v1/notes", headers=headers, json={"path": note_path, "content": (vault / note_path).read_text() + "\nVerified.\n"})
     assert r.status_code == 200, r.text

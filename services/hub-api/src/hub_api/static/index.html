@@ -435,7 +435,11 @@ async function api(path, opts = {}) {
   const text = await res.text();
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = { detail: text }; }
-  if (!res.ok) throw new Error((data && data.detail) || `请求失败 (${res.status})`);
+  if (!res.ok) {
+    const err = new Error((data && data.detail) || `请求失败 (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
   return data;
 }
 
@@ -876,6 +880,9 @@ async function renderProjectLivingTab(slug, root) {
           </select>
         </div>
       </div>
+      <div id="living-conflict" style="display:none;margin-bottom:12px;padding:10px 12px;border-radius:8px;background:var(--amber-soft);color:var(--amber);font-size:13px;">
+        在你编辑期间，总文档已被其他人或 Agent 更新，所以这次保存被拒绝，没有覆盖对方的修改。请先复制你的改动，点右上角刷新读取最新版本，再把改动合并进去重新提交。
+      </div>
       <div style="display:flex;justify-content:flex-end;gap:8px;">
         <button class="btn" id="btn-cancel-living">取消</button>
         <button class="btn btn-primary" id="btn-save-living">保存并提交 Git Commit</button>
@@ -900,13 +907,18 @@ async function renderProjectLivingTab(slug, root) {
     try {
       const res = await api("/api/v1/living-doc", {
         method: "POST",
-        body: JSON.stringify({ project: slug, patch, summary, mode, actor: "human" }),
+        body: JSON.stringify({ project: slug, patch, summary, mode, actor: "human", base_commit: ctx.living_commit || null }),
       });
       toast(mode === "pr" ? `已创建 PR 分支：${res.branch}` : `已提交 Commit ${res.commit.slice(0, 7)}`);
       await reloadOverview();
       await renderProjectView(slug, "living");
     } catch (err) {
-      toast("保存失败：" + err.message);
+      if (err.status === 409) {
+        document.getElementById("living-conflict").style.display = "block";
+        toast("保存失败：总文档已被其他人更新");
+      } else {
+        toast("保存失败：" + err.message);
+      }
     }
   };
 }
