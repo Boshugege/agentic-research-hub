@@ -153,6 +153,8 @@
   .pill-human { background: var(--human-soft); color: var(--human); }
   .pill-amber { background: var(--amber-soft); color: var(--amber); }
   .pill-green { background: var(--green-soft); color: var(--green); }
+  .pill-red { background: var(--red-soft); color: var(--red); }
+  .pill-solid { background: var(--text); color: var(--surface); }
 
   .sidebar-footer {
     padding: 10px 12px; border-top: 1px solid var(--border);
@@ -178,7 +180,7 @@
   .container { max-width: 1020px; margin: 0 auto; }
 
   /* Cards & KPI */
-  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 24px; }
+  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 14px; margin-bottom: 24px; }
   .kpi-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; box-shadow: var(--shadow-sm); }
   .kpi-label { font-size: 12px; color: var(--text-muted); font-weight: 500; }
   .kpi-value { font-size: 26px; font-weight: 700; margin-top: 4px; letter-spacing: -0.02em; }
@@ -220,6 +222,31 @@
   .timeline-card-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--text-muted); margin-bottom: 10px; }
   .timeline-time { font-family: var(--mono); color: var(--text-muted); font-size: 12px; }
   .tag-chip { font-size: 11px; padding: 1px 7px; border-radius: 5px; background: var(--surface-2); color: var(--text-muted); font-family: var(--mono); }
+  .thread-chip {
+    font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 5px; cursor: pointer;
+    border: 1px solid var(--accent-border); background: var(--accent-soft); color: var(--accent); font-family: var(--mono);
+  }
+  .thread-chip:hover { border-color: var(--accent); }
+  .timeline-card.is-superseded { opacity: 0.6; }
+  .timeline-card.is-superseded .timeline-card-title { text-decoration: line-through; }
+  .note-links { display: flex; align-items: baseline; gap: 4px 10px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-muted); margin: 0 0 10px; }
+  .note-link { color: var(--accent); cursor: pointer; }
+  .note-link:hover { text-decoration: underline; }
+  .tl-filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .tl-check { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+  .thread-banner {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+    padding: 10px 14px; margin-bottom: 14px; border-radius: var(--radius);
+    background: var(--accent-soft); border: 1px solid var(--accent-border); font-size: 13px;
+  }
+  .digest-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); margin-bottom: 28px; overflow: hidden; }
+  .digest-row { display: flex; align-items: center; gap: 6px 10px; flex-wrap: wrap; padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .digest-row:last-child { border-bottom: none; }
+  .digest-row.is-link { cursor: pointer; }
+  .digest-row.is-link:hover { background: var(--surface-hover); }
+  .digest-name { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+  .digest-sub { color: var(--text-muted); font-size: 12px; }
+  .digest-head { padding: 8px 16px; font-size: 12px; font-weight: 600; color: var(--text-muted); background: var(--surface-2); border-bottom: 1px solid var(--border); }
 
   /* Living Doc & Markdown Rendering */
   .doc-shell { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 28px 32px; box-shadow: var(--shadow-sm); }
@@ -391,6 +418,7 @@ const state = {
   authenticated: false,
   overview: null,
   route: { view: "home", project: null, tab: "timeline" },
+  pendingThread: null,
   forgejoUrl: null,
   projectCache: {},
 };
@@ -412,6 +440,38 @@ function esc(s) {
 function shortTime(isoStr) {
   if (!isoStr) return "";
   return String(isoStr).replace("T", " ").slice(0, 16);
+}
+
+const KIND_META = {
+  note: { label: "笔记", cls: "" },
+  idea: { label: "想法", cls: "pill-accent" },
+  plan: { label: "计划", cls: "pill-amber" },
+  result: { label: "结果", cls: "pill-green" },
+  negative: { label: "负结果", cls: "pill-red" },
+  decision: { label: "决策", cls: "pill-solid" },
+  meeting: { label: "组会", cls: "" },
+};
+
+function kindPill(kind, count) {
+  if (!kind || (kind === "note" && count === undefined)) return "";
+  const meta = KIND_META[kind] || KIND_META.note;
+  return `<span class="pill ${meta.cls}">${meta.label}${count === undefined ? "" : " " + count}</span>`;
+}
+
+function noteLabel(path, titles) {
+  if (titles && titles[path]) return titles[path];
+  return String(path).split("/").pop().replace(/\.md$/, "").replace(/^\d{4}-\d{2}-\d{2}_\d{4}_/, "");
+}
+
+function noteLinks(label, paths, titles) {
+  if (!paths || !paths.length) return "";
+  return `<span>${label}${paths.map(p => `<a class="note-link" data-note-link="${esc(p)}">${esc(noteLabel(p, titles))}</a>`).join("、")}</span>`;
+}
+
+function bindNoteLinks(container) {
+  container.querySelectorAll("[data-note-link]").forEach(a => {
+    a.onclick = (e) => { e.stopPropagation(); openNotePreviewModal(a.getAttribute("data-note-link")); };
+  });
 }
 
 function toast(msg) {
@@ -659,6 +719,7 @@ async function navigate(view, project = null, tab = "timeline") {
 // -------------------- View: Home Overview --------------------
 async function renderHomeView() {
   const ov = state.overview;
+  const digest = await api("/api/v1/digest?days=7").catch(() => null);
   document.getElementById("topbar-title").textContent = "全局总览";
   document.getElementById("topbar-slug").style.display = "none";
   document.getElementById("topbar-right").innerHTML = `
@@ -680,7 +741,7 @@ async function renderHomeView() {
       </div>
       <p class="project-card-desc">${esc(p.description || (p.latest_timeline_title ? "最近更新：" + p.latest_timeline_title : "尚无时间线记录，等待你或 AI Agent 写入。"))}</p>
       <div class="project-card-meta">
-        <span>🕒 ${p.timeline_count || 0} 条时间线${p.latest_timeline_at ? " · " + shortTime(p.latest_timeline_at) : ""}</span>
+        <span>🕒 ${p.timeline_count || 0} 条时间线${p.thread_count ? " · " + p.thread_count + " 条线索" : ""}${p.undistilled_count ? " · " + p.undistilled_count + " 条待并入" : ""}</span>
         <div class="project-card-actions">
           <button class="btn btn-sm" data-jump="${esc(p.slug)}:timeline">时间线</button>
           <button class="btn btn-sm" data-jump="${esc(p.slug)}:living">总文档</button>
@@ -697,7 +758,9 @@ async function renderHomeView() {
             <div class="timeline-card-meta">
               <span class="timeline-time">${shortTime(item.created_at)}</span>
               <span class="pill pill-accent">${esc(item.project)}</span>
+              ${kindPill(item.kind)}
               <span class="pill ${isAgent ? "pill-agent" : "pill-human"}">${esc(item.author)}</span>
+              ${item.thread ? `<span class="thread-chip" data-feed-thread="${esc(item.thread)}" data-feed-thread-proj="${esc(item.project)}">⌁ ${esc(item.thread)}</span>` : ""}
               ${(item.tags || []).map(t => `<span class="tag-chip">#${esc(t)}</span>`).join("")}
             </div>
             <h4 class="timeline-card-title" style="font-size:15px;">${esc(item.title)}</h4>
@@ -715,10 +778,12 @@ async function renderHomeView() {
     <div class="kpi-grid">
       <div class="kpi-card"><div class="kpi-label">已注册研究项目</div><div class="kpi-value">${ov.projects.length}</div></div>
       <div class="kpi-card"><div class="kpi-label">时间线笔记总数</div><div class="kpi-value">${ov.total_timeline}</div></div>
+      <div class="kpi-card"><div class="kpi-label">待并入总文档的笔记</div><div class="kpi-value">${ov.projects.reduce((n, p) => n + (p.undistilled_count || 0), 0)}</div></div>
       <div class="kpi-card"><div class="kpi-label">待整理 Inbox 日志</div><div class="kpi-value">${ov.inbox_count}</div></div>
     </div>
     <div class="section-title"><span>📂 研究项目</span></div>
     <div class="project-grid">${projCards}</div>
+    ${renderDigest(digest)}
     <div class="section-title"><span>🕒 全站最新时间线</span></div>
     ${recentFeed}
   `;
@@ -736,6 +801,39 @@ async function renderHomeView() {
   root.querySelectorAll("[data-feed-path]").forEach(card => {
     card.onclick = () => openNotePreviewModal(card.getAttribute("data-feed-path"));
   });
+  root.querySelectorAll("[data-feed-thread]").forEach(chip => {
+    chip.onclick = (e) => {
+      e.stopPropagation();
+      state.pendingThread = chip.getAttribute("data-feed-thread");
+      navigate("project", chip.getAttribute("data-feed-thread-proj"), "timeline");
+    };
+  });
+}
+
+function renderDigest(digest) {
+  if (!digest) return "";
+  const active = digest.projects.filter(p => p.notes > 0);
+  const projectRows = active.map(p => `
+    <div class="digest-row is-link" data-open-proj="${esc(p.slug)}">
+      <span class="digest-name">${esc(p.name || p.slug)}</span>
+      <span class="digest-sub">${p.notes} 条记录</span>
+      ${Object.keys(KIND_META).filter(k => p.by_kind[k]).map(k => kindPill(k, p.by_kind[k])).join("")}
+      <span class="digest-sub">${p.living_doc_updates ? "总文档更新 " + p.living_doc_updates + " 次" : "总文档未更新"}${p.undistilled_count ? " · " + p.undistilled_count + " 条待并入" : ""}</span>
+    </div>`).join("");
+  const highlights = digest.highlights.map(h => `
+    <div class="digest-row is-link" data-feed-path="${esc(h.path)}">
+      <span class="timeline-time">${shortTime(h.event_date).slice(5)}</span>
+      ${kindPill(h.kind)}
+      <span class="pill pill-accent">${esc(h.project)}</span>
+      <span class="digest-name">${esc(h.title)}</span>
+    </div>`).join("");
+  const body = active.length ? `
+      ${projectRows}
+      ${highlights ? `<div class="digest-head">这段时间的决策、结果与负结果</div>${highlights}` : ""}`
+    : `<div class="digest-row"><span class="digest-sub">近 ${digest.days} 天没有新的时间线记录。</span></div>`;
+  return `
+    <div class="section-title"><span>🧭 近 ${digest.days} 天（按事件日期）</span></div>
+    <div class="digest-card">${body}</div>`;
 }
 
 // -------------------- View: Project Workspace --------------------
@@ -768,27 +866,56 @@ async function renderProjectView(slug, tab) {
 }
 
 async function renderProjectTimelineTab(slug, root) {
-  const data = await api(`/api/v1/projects/${encodeURIComponent(slug)}/timeline?limit=100&include_content=true`);
+  const data = await api(`/api/v1/projects/${encodeURIComponent(slug)}/timeline?limit=500&include_content=true`);
   const items = data.items || [];
+  const titles = Object.fromEntries(items.map(it => [it.path, it.title]));
+  const needsDistilling = (it) => !it.distilled && !(it.superseded_by || []).length;
+  const backlog = items.filter(needsDistilling).length;
 
-  const renderList = (filterText = "") => {
-    const q = filterText.trim().toLowerCase();
-    const filtered = q ? items.filter(it =>
-      (it.title || "").toLowerCase().includes(q) ||
-      (it.body || "").toLowerCase().includes(q) ||
-      (it.tags || []).some(t => t.toLowerCase().includes(q)) ||
-      (it.author || "").toLowerCase().includes(q)
-    ) : items;
+  const threads = [];
+  const threadCounts = {};
+  for (const it of items) {
+    if (!it.thread) continue;
+    if (!(it.thread in threadCounts)) { threadCounts[it.thread] = 0; threads.push(it.thread); }
+    threadCounts[it.thread] += 1;
+  }
+  const kindsPresent = Object.keys(KIND_META).filter(k => items.some(it => it.kind === k));
+
+  const view = { text: "", kind: "", thread: "", backlogOnly: false };
+  if (state.pendingThread && threads.includes(state.pendingThread)) view.thread = state.pendingThread;
+  state.pendingThread = null;
+
+  const renderList = () => {
+    const q = view.text.trim().toLowerCase();
+    let filtered = items.filter(it =>
+      (!view.kind || it.kind === view.kind) &&
+      (!view.thread || it.thread === view.thread) &&
+      (!view.backlogOnly || needsDistilling(it)) &&
+      (!q ||
+        (it.title || "").toLowerCase().includes(q) ||
+        (it.body || "").toLowerCase().includes(q) ||
+        (it.tags || []).some(t => String(t).toLowerCase().includes(q)) ||
+        (it.thread || "").includes(q) ||
+        (it.author || "").toLowerCase().includes(q)));
+    const filtering = q || view.kind || view.thread || view.backlogOnly;
 
     if (!filtered.length) {
       return `<div class="empty-state">
         <div style="font-size:26px;margin-bottom:8px;">🕒</div>
-        <div style="font-weight:600;color:var(--text);margin-bottom:4px;">${q ? "没有匹配的时间线笔记" : "该项目暂无时间线记录"}</div>
+        <div style="font-weight:600;color:var(--text);margin-bottom:4px;">${filtering ? "没有匹配的时间线笔记" : "该项目暂无时间线记录"}</div>
         <div>点击右上角「+ 新增时间线」手动记录，或由项目 Agent 调用 <code>append_timeline_note</code> 自动写入。</div>
       </div>`;
     }
 
     let html = "";
+    if (view.thread) {
+      filtered = filtered.slice().reverse();
+      html += `<div class="thread-banner">
+        <span>线索 <strong style="font-family:var(--mono);">${esc(view.thread)}</strong> · ${filtered.length} 条 · ${shortTime(filtered[0].created_at).slice(0, 10)} 起，按时间正序阅读</span>
+        <button class="btn btn-sm" id="tl-clear-thread">返回完整时间线</button>
+      </div>`;
+    }
+
     let curMonth = null;
     for (const item of filtered) {
       const m = (item.created_at || "").slice(0, 7) || "未分组";
@@ -798,19 +925,29 @@ async function renderProjectTimelineTab(slug, root) {
         html += `<div class="timeline-month">${esc(m)}</div><div class="timeline-rail">`;
       }
       const isAgent = String(item.author || "").startsWith("agent:");
+      const superseded = (item.superseded_by || []).length > 0;
       const bodyClean = (item.body || "").replace(/^#\s+[^\n]+\n+/, "");
+      const links = [
+        noteLinks("已被取代 → ", item.superseded_by, titles),
+        noteLinks("承接：", item.follows, titles),
+        noteLinks("取代：", item.supersedes, titles),
+      ].filter(Boolean).join("");
       html += `
-        <article class="timeline-card ${isAgent ? "is-agent" : ""}">
+        <article class="timeline-card ${isAgent ? "is-agent" : ""} ${superseded ? "is-superseded" : ""}">
           <div class="timeline-card-head">
             <h3 class="timeline-card-title">${esc(item.title)}</h3>
             <button class="btn btn-sm btn-ghost" data-edit-note="${esc(item.path)}">✏️ 编辑</button>
           </div>
           <div class="timeline-card-meta">
             <span class="timeline-time">${shortTime(item.created_at)}</span>
+            ${kindPill(item.kind)}
             <span class="pill ${isAgent ? "pill-agent" : "pill-human"}">${esc(item.author)}</span>
             <span class="pill">${esc(item.status)}</span>
+            ${item.thread ? `<span class="thread-chip" data-thread="${esc(item.thread)}">⌁ ${esc(item.thread)}</span>` : ""}
             ${(item.tags || []).map(t => `<span class="tag-chip">#${esc(t)}</span>`).join("")}
+            ${needsDistilling(item) ? `<span class="pill pill-amber">未并入总文档</span>` : ""}
           </div>
+          ${links ? `<div class="note-links">${links}</div>` : ""}
           <div class="md">${renderMarkdown(bodyClean)}</div>
         </article>`;
     }
@@ -820,24 +957,43 @@ async function renderProjectTimelineTab(slug, root) {
 
   root.innerHTML = `
     <div class="timeline-toolbar">
-      <input class="input" id="tl-filter" style="max-width:340px;" placeholder="过滤本项目时间线（标题 / 内容 / 标签 / 作者）..." />
-      <span style="font-size:12.5px;color:var(--text-muted);">共 ${items.length} 条记录（按时间倒序）</span>
+      <div class="tl-filters">
+        <input class="input" id="tl-filter" style="width:260px;max-width:100%;" placeholder="过滤标题 / 内容 / 标签 / 线索 / 作者..." />
+        <select class="select" id="tl-kind" style="width:auto;">
+          <option value="">全部类型</option>
+          ${kindsPresent.map(k => `<option value="${k}">${KIND_META[k].label}</option>`).join("")}
+        </select>
+        <select class="select" id="tl-thread" style="width:auto;max-width:220px;">
+          <option value="">全部线索${threads.length ? `（${threads.length}）` : ""}</option>
+          ${threads.map(t => `<option value="${esc(t)}">${esc(t)}（${threadCounts[t]}）</option>`).join("")}
+        </select>
+        <label class="tl-check"><input type="checkbox" id="tl-backlog" /> 仅未并入总文档（${backlog}）</label>
+      </div>
+      <span style="font-size:12.5px;color:var(--text-muted);">共 ${items.length} 条记录</span>
     </div>
-    <div id="tl-list">${renderList()}</div>
+    <div id="tl-list"></div>
   `;
 
-  const bindCards = () => {
+  const refresh = () => {
     const listEl = document.getElementById("tl-list");
+    listEl.innerHTML = renderList();
+    document.getElementById("tl-thread").value = view.thread;
     bindWikiLinks(listEl);
+    bindNoteLinks(listEl);
     listEl.querySelectorAll("[data-edit-note]").forEach(btn => {
       btn.onclick = () => openEditNoteModal(btn.getAttribute("data-edit-note"), () => renderProjectView(slug, "timeline"));
     });
+    listEl.querySelectorAll("[data-thread]").forEach(chip => {
+      chip.onclick = () => { view.thread = chip.getAttribute("data-thread"); refresh(); };
+    });
+    const clearBtn = document.getElementById("tl-clear-thread");
+    if (clearBtn) clearBtn.onclick = () => { view.thread = ""; refresh(); };
   };
-  bindCards();
-  document.getElementById("tl-filter").oninput = (e) => {
-    document.getElementById("tl-list").innerHTML = renderList(e.target.value);
-    bindCards();
-  };
+  refresh();
+  document.getElementById("tl-filter").oninput = (e) => { view.text = e.target.value; refresh(); };
+  document.getElementById("tl-kind").onchange = (e) => { view.kind = e.target.value; refresh(); };
+  document.getElementById("tl-thread").onchange = (e) => { view.thread = e.target.value; refresh(); };
+  document.getElementById("tl-backlog").onchange = (e) => { view.backlogOnly = e.target.checked; refresh(); };
 }
 
 async function renderProjectLivingTab(slug, root) {
@@ -881,7 +1037,7 @@ async function renderProjectLivingTab(slug, root) {
         </div>
       </div>
       <div id="living-conflict" style="display:none;margin-bottom:12px;padding:10px 12px;border-radius:8px;background:var(--amber-soft);color:var(--amber);font-size:13px;">
-        在你编辑期间，总文档已被其他人或 Agent 更新，所以这次保存被拒绝，没有覆盖对方的修改。请先复制你的改动，点右上角刷新读取最新版本，再把改动合并进去重新提交。
+        在你编辑期间，总文档已被其他人或 Agent 更新，所以这次保存被拒绝，没有覆盖对方的修改。请先复制你的改动，点侧栏顶部的刷新按钮读取最新版本，再把改动合并进去重新提交。
       </div>
       <div style="display:flex;justify-content:flex-end;gap:8px;">
         <button class="btn" id="btn-cancel-living">取消</button>
@@ -1116,6 +1272,10 @@ function openNewTimelineModal(defaultSlug) {
       <div class="field"><label>事件日期（留空=现在）</label><input class="input" id="nt-date" placeholder="YYYY-MM-DD" /></div>
       <div class="field"><label>状态</label><select class="select" id="nt-status"><option value="draft">draft</option><option value="verified">verified</option><option value="final">final</option></select></div>
     </div>
+    <div style="display:grid;grid-template-columns:160px 1fr;gap:10px;">
+      <div class="field"><label>类型</label><select class="select" id="nt-kind">${Object.keys(KIND_META).map(k => `<option value="${k}">${KIND_META[k].label}</option>`).join("")}</select></div>
+      <div class="field"><label>线索（可选；延续已有工作时选用已有线索）</label><input class="input" id="nt-thread" list="nt-thread-list" placeholder="例如：bem-solver" /><datalist id="nt-thread-list"></datalist></div>
+    </div>
     <div class="field"><label>标题</label><input class="input" id="nt-title" placeholder="例如：传感器滤波实验结果分析" /></div>
     <div class="field"><label>标签（逗号分隔，可选）</label><input class="input" id="nt-tags" placeholder="experiment, pipeline, bugfix" /></div>
     <div class="field"><label>正文（支持 Markdown）</label><textarea class="textarea" id="nt-content" style="min-height:220px;" placeholder="记录本次实验发现、参数、结论或待办..."></textarea></div>
@@ -1124,8 +1284,18 @@ function openNewTimelineModal(defaultSlug) {
       <button class="btn btn-primary" id="nt-submit">保存并自动 Commit</button>
     </div>
   `);
+  const loadThreadOptions = async () => {
+    const proj = document.getElementById("nt-proj").value;
+    const res = await api(`/api/v1/projects/${encodeURIComponent(proj)}/threads`).catch(() => ({ threads: [] }));
+    const list = document.getElementById("nt-thread-list");
+    if (list) list.innerHTML = res.threads.map(t => `<option value="${esc(t.thread)}">${esc(t.latest_title)}</option>`).join("");
+  };
+  document.getElementById("nt-proj").onchange = loadThreadOptions;
+  loadThreadOptions();
   document.getElementById("nt-submit").onclick = async () => {
     const project = document.getElementById("nt-proj").value;
+    const kind = document.getElementById("nt-kind").value;
+    const thread = document.getElementById("nt-thread").value.trim() || null;
     const title = document.getElementById("nt-title").value.trim();
     const content = document.getElementById("nt-content").value.trim();
     const event_date = document.getElementById("nt-date").value.trim() || null;
@@ -1135,7 +1305,7 @@ function openNewTimelineModal(defaultSlug) {
     try {
       const res = await api("/api/v1/timeline", {
         method: "POST",
-        body: JSON.stringify({ project, title, content, event_date, tags, status, author: "human" }),
+        body: JSON.stringify({ project, title, content, event_date, kind, thread, tags, status, author: "human" }),
       });
       closeModal();
       toast(`已写入时间线 (${res.commit.slice(0, 7)})`);
