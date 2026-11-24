@@ -196,6 +196,33 @@ with tempfile.TemporaryDirectory() as td:
     r = client.post("/api/v1/search", headers=headers, json={"query": "body", "project": "new-sensor-lab", "kind": "negative"})
     assert {x["path"] for x in r.json()["results"]} == {result["path"]}, r.text
 
+    # 3d-2. Distillation backlog and cross-project digest
+    backlog = client.get("/api/v1/projects/new-sensor-lab/undistilled", headers=headers).json()
+    backlog_paths = [i["path"] for i in backlog["items"]]
+    assert note_path not in backlog_paths, "note cited in Source-Notes must count as distilled"
+    assert idea["path"] not in backlog_paths, "superseded notes need no distilling"
+    assert fresh_path in backlog_paths and decision["path"] in backlog_paths, backlog_paths
+    assert backlog_paths.index(result["path"]) < backlog_paths.index(decision["path"]), "oldest first"
+    base = client.get("/api/v1/projects/new-sensor-lab/context", headers=headers).json()["living_commit"]
+    r = client.post("/api/v1/living-doc", headers=headers, json={
+        "project": "new-sensor-lab", "section": "Key Findings", "base_commit": base,
+        "summary": f"Fresh run confirmed, see [[{fresh_path.removesuffix('.md')}|fresh run]].",
+    })
+    assert r.status_code == 200, r.text
+    ctx = client.get("/api/v1/projects/new-sensor-lab/context", headers=headers).json()
+    assert fresh_path not in ctx["undistilled"] and decision["path"] in ctx["undistilled"], ctx["undistilled"]
+    stats = next(p for p in client.get("/api/v1/projects", headers=headers).json()["projects"] if p["slug"] == "new-sensor-lab")
+    assert stats["undistilled_count"] == len(ctx["undistilled"]) and stats["thread_count"] == 1, stats
+
+    today_decision = add_note(title="Ship complementary filter", kind="decision", thread="filter-design", follows=[decision["path"]])
+    digest = client.get("/api/v1/digest", headers=headers, params={"days": 1}).json()
+    lab = next(p for p in digest["projects"] if p["slug"] == "new-sensor-lab")
+    assert [h["path"] for h in digest["highlights"]] == [today_decision["path"]], digest["highlights"]
+    assert lab["by_kind"].get("decision") == 1 and lab["living_doc_updates"] >= 1 and lab["active_threads"][0]["thread"] == "filter-design", lab
+    assert digest["total_notes"] == lab["notes"] and lab["undistilled_count"] == stats["undistilled_count"] + 1, digest
+    ov = client.get("/api/v1/overview", headers=headers).json()
+    assert ov["recent_timeline"][0]["path"] == today_decision["path"] and ov["recent_timeline"][0]["distilled"] is False, ov["recent_timeline"][0]
+
     # 3e. Per-agent keys: server-assigned identity, project-scoped writes, revocation
     from hub_api import keys as agent_keys
     bot_key = agent_keys.add("sensor-bot", ["new-sensor-lab"])
@@ -233,8 +260,11 @@ with tempfile.TemporaryDirectory() as td:
     assert r.status_code == 200 and r.json()["result"]["serverInfo"]["name"] == "agentic-research-hub", r.text
     r = client.post("/mcp", headers=headers, json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     tool_names = [t["name"] for t in r.json()["result"]["tools"]]
-    assert len(tool_names) == 13 and "list_threads" in tool_names, tool_names
+    assert len(tool_names) == 15 and {"list_threads", "list_undistilled_notes", "get_digest"} <= set(tool_names), tool_names
     r = client.post("/mcp", headers=headers, json={"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "list_threads", "arguments": {"project": "new-sensor-lab"}}})
     assert r.json()["result"]["isError"] is False and "filter-design" in r.json()["result"]["content"][0]["text"], r.text
+    for tool, args in (("list_undistilled_notes", {"project": "new-sensor-lab"}), ("get_digest", {"days": 3}), ("get_project_context", {"project": "new-sensor-lab"})):
+        r = client.post("/mcp", headers=headers, json={"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": tool, "arguments": args}})
+        assert r.json()["result"]["isError"] is False, r.text
 
 print("all smoke tests passed")

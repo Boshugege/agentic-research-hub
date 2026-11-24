@@ -585,9 +585,29 @@ def stack_health() -> dict[str, Any]:
 
 # -------------------- Projects & Overview --------------------
 
+def _distilled_refs(slug: str) -> set[str]:
+    """Notes already folded into the project's LIVING_DOC.md.
+
+    A note counts as distilled when a commit that changed LIVING_DOC.md names it
+    in its Source-Notes trailer, or when the current document wiki-links to it.
+    """
+    rel = f"projects/{slug}/LIVING_DOC.md"
+    refs: set[str] = set()
+    trailers = run_git("log", "--format=%b", "--", rel, check=False) if (VAULT / ".git").exists() else ""
+    for match in re.finditer(r"^Source-Notes:\s*(.+)$", trailers, re.MULTILINE):
+        refs.update(part.strip() for part in match.group(1).split(","))
+    doc = VAULT / rel
+    if doc.exists():
+        for match in re.finditer(r"\[\[([^\]|#]+)", doc.read_text(errors="ignore")):
+            ref = match.group(1).strip()
+            refs.add(ref if ref.endswith(".md") else f"{ref}.md")
+    return refs
+
+
 def _collect_timeline_items(slug: str, include_content: bool = False, keep_sort_key: bool = False) -> list[dict[str, Any]]:
     root = VAULT / "projects" / slug
     items: list[dict[str, Any]] = []
+    distilled = _distilled_refs(slug) if (root / "timeline").exists() else set()
     if (root / "timeline").exists():
         for path in (root / "timeline").rglob("*.md"):
             text = path.read_text(errors="ignore")
@@ -610,6 +630,7 @@ def _collect_timeline_items(slug: str, include_content: bool = False, keep_sort_
                 "follows": meta.get("follows") or [],
                 "supersedes": meta.get("supersedes") or [],
                 "superseded_by": [],
+                "distilled": str(path.relative_to(VAULT)) in distilled,
                 "tags": meta.get("tags") or [],
                 "artifacts": meta.get("artifacts") or [],
             }
@@ -654,13 +675,46 @@ def _thread_summaries(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return list(threads.values())
 
 
+def _needs_distilling(item: dict[str, Any]) -> bool:
+    """Not yet reflected in LIVING_DOC.md, and not overturned by a later note."""
+    return not item["distilled"] and not item["superseded_by"]
+
+
+def _project_entries(timelines: Optional[dict[str, list[dict[str, Any]]]] = None) -> list[dict[str, Any]]:
+    """Registered projects; with per-project stats when their timeline items are supplied."""
+    data = []
+    for slug, config in projects().items():
+        item = {"slug": slug, **(config if isinstance(config, dict) else {})}
+        if timelines is not None:
+            root = VAULT / "projects" / slug
+            notes = timelines.get(slug, [])
+            item["timeline_count"] = len(notes)
+            item["latest_timeline"] = notes[0]["path"] if notes else None
+            item["latest_timeline_title"] = notes[0]["title"] if notes else None
+            item["latest_timeline_at"] = notes[0]["created_at"] if notes else None
+            item["thread_count"] = len({n["thread"] for n in notes if n["thread"]})
+            item["undistilled_count"] = sum(1 for n in notes if _needs_distilling(n))
+            item["literature_count"] = len(list((root / "literature").glob("*.md"))) if (root / "literature").exists() else 0
+            living_path = root / "LIVING_DOC.md"
+            if living_path.exists():
+                lmeta = parse_frontmatter(living_path.read_text(errors="ignore"))
+                item["living_updated_at"] = lmeta.get("updated_at")
+                item["living_author"] = lmeta.get("author")
+        data.append(item)
+    return data
+
+
+def _inbox_count() -> int:
+    return len(list((VAULT / "_inbox").rglob("*.md"))) if (VAULT / "_inbox").exists() else 0
+
+
 @app.get("/api/v1/overview", dependencies=[Depends(auth)])
 def overview(recent_limit: int = 20) -> dict[str, Any]:
-    proj_list = list_projects(include_stats=True)
-    all_recent: list[dict[str, Any]] = []
-    for p in proj_list["projects"]:
-        all_recent.extend(_collect_timeline_items(p["slug"], include_content=False))
-    all_recent.sort(key=lambda x: str(x.get("created_at") or x["path"]), reverse=True)
+    timelines = {slug: _collect_timeline_items(slug, keep_sort_key=True) for slug in projects()}
+    all_recent = [item for notes in timelines.values() for item in notes]
+    all_recent.sort(key=lambda item: item["sort_key"], reverse=True)
+    for item in all_recent:
+        item.pop("sort_key", None)
 
     inbox_entries = []
     inbox_root = VAULT / "_inbox"
@@ -677,7 +731,7 @@ def overview(recent_limit: int = 20) -> dict[str, Any]:
             })
 
     return {
-        "projects": proj_list["projects"],
+        "projects": _project_entries(timelines),
         "recent_timeline": all_recent[:recent_limit],
         "inbox": inbox_entries,
         "inbox_count": len(inbox_entries),
@@ -686,27 +740,55 @@ def overview(recent_limit: int = 20) -> dict[str, Any]:
     }
 
 
+@app.get("/api/v1/digest", dependencies=[Depends(auth)])
+def get_digest(days: int = 7) -> dict[str, Any]:
+    """Cross-project digest: what happened in the last N days, by event date."""
+    days = max(1, min(days, 365))
+    cutoff = now() - timedelta(days=days)
+    per_project = []
+    highlights: list[dict[str, Any]] = []
+    totals: dict[str, int] = {}
+    for slug, config in projects().items():
+        notes = _collect_timeline_items(slug, keep_sort_key=True)
+        recent = [n for n in notes if n["sort_key"] >= cutoff]
+        by_kind: dict[str, int] = {}
+        by_author: dict[str, int] = {}
+        for note in recent:
+            by_kind[note["kind"]] = by_kind.get(note["kind"], 0) + 1
+            by_author[note["author"]] = by_author.get(note["author"], 0) + 1
+            totals[note["kind"]] = totals.get(note["kind"], 0) + 1
+            if note["kind"] in {"decision", "negative", "result"}:
+                highlights.append(note)
+        living_updates = run_git(
+            "log", f"--since={cutoff.isoformat(timespec='seconds')}", "--format=%H", "--", f"projects/{slug}/LIVING_DOC.md", check=False,
+        ).split()
+        per_project.append({
+            "slug": slug,
+            "name": config.get("name", slug) if isinstance(config, dict) else slug,
+            "notes": len(recent),
+            "by_kind": by_kind,
+            "by_author": by_author,
+            "active_threads": [t for t in _thread_summaries(recent)],
+            "living_doc_updates": len(living_updates),
+            "undistilled_count": sum(1 for n in notes if _needs_distilling(n)),
+        })
+    highlights.sort(key=lambda item: item["sort_key"], reverse=True)
+    for item in highlights:
+        item.pop("sort_key", None)
+    return {
+        "days": days,
+        "since": cutoff.isoformat(timespec="seconds"),
+        "total_notes": sum(p["notes"] for p in per_project),
+        "by_kind": totals,
+        "projects": per_project,
+        "highlights": highlights,
+    }
+
+
 @app.get("/api/v1/projects", dependencies=[Depends(auth)])
 def list_projects(include_stats: bool = True) -> dict[str, Any]:
-    data = []
-    for slug, config in projects().items():
-        item = {"slug": slug, **(config if isinstance(config, dict) else {})}
-        if include_stats:
-            root = VAULT / "projects" / slug
-            timelines = _collect_timeline_items(slug, include_content=False)
-            item["timeline_count"] = len(timelines)
-            item["latest_timeline"] = timelines[0]["path"] if timelines else None
-            item["latest_timeline_title"] = timelines[0]["title"] if timelines else None
-            item["latest_timeline_at"] = timelines[0]["created_at"] if timelines else None
-            item["literature_count"] = len(list((root / "literature").glob("*.md"))) if (root / "literature").exists() else 0
-            living_path = root / "LIVING_DOC.md"
-            if living_path.exists():
-                lmeta = parse_frontmatter(living_path.read_text(errors="ignore"))
-                item["living_updated_at"] = lmeta.get("updated_at")
-                item["living_author"] = lmeta.get("author")
-        data.append(item)
-    inbox = list((VAULT / "_inbox").rglob("*.md")) if (VAULT / "_inbox").exists() else []
-    return {"projects": data, "inbox_count": len(inbox)}
+    timelines = {slug: _collect_timeline_items(slug) for slug in projects()} if include_stats else None
+    return {"projects": _project_entries(timelines), "inbox_count": _inbox_count()}
 
 
 @app.post("/api/v1/projects")
@@ -802,6 +884,14 @@ def list_threads(project: str) -> dict[str, Any]:
     }
 
 
+@app.get("/api/v1/projects/{project}/undistilled", dependencies=[Depends(auth)])
+def list_undistilled_notes(project: str) -> dict[str, Any]:
+    project_path(project)
+    items = [item for item in _collect_timeline_items(project) if _needs_distilling(item)]
+    items.reverse()
+    return {"project": project, "count": len(items), "items": items}
+
+
 @app.get("/api/v1/projects/{project}/context", dependencies=[Depends(auth)])
 def get_project_context(project: str, recent_days: int = 14, include_lit: bool = True) -> dict[str, Any]:
     root = project_path(project)
@@ -813,6 +903,7 @@ def get_project_context(project: str, recent_days: int = 14, include_lit: bool =
         meta = parse_frontmatter(text)
         if note_event_datetime(meta, path) >= cutoff:
             timeline.append({"path": str(path.relative_to(VAULT)), "frontmatter": meta, "content": text})
+    all_items = _collect_timeline_items(project)
     literature = []
     if include_lit and (root / "literature").exists():
         literature = [str(path.relative_to(VAULT)) for path in sorted((root / "literature").glob("*.md"))]
@@ -824,7 +915,8 @@ def get_project_context(project: str, recent_days: int = 14, include_lit: bool =
         "living_frontmatter": parse_frontmatter(living),
         "living_body": strip_frontmatter(living),
         "timeline": timeline,
-        "threads": _thread_summaries(_collect_timeline_items(project)),
+        "threads": _thread_summaries(all_items),
+        "undistilled": [item["path"] for item in reversed(all_items) if _needs_distilling(item)],
         "literature": literature,
     }
 
@@ -1260,7 +1352,7 @@ MCP_TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "get_project_context",
-        "description": "Fetch a project's current LIVING_DOC.md plus recent timeline notes and literature list in one call.",
+        "description": "Start here. Fetch a project's current LIVING_DOC.md (with living_commit for later updates), timeline notes whose event date falls in the last recent_days, thread summaries, the undistilled backlog, and the literature list in one call.",
         "inputSchema": {
             "type": "object",
             "required": ["project"],
@@ -1347,6 +1439,27 @@ MCP_TOOLS: list[dict[str, Any]] = [
             "properties": {
                 "project": {"type": "string"},
                 "limit": {"type": "integer", "default": 20},
+            },
+        },
+    },
+    {
+        "name": "list_undistilled_notes",
+        "description": "List timeline notes not yet reflected in the project's LIVING_DOC.md (oldest first, superseded notes excluded). A note counts as distilled once an update_living_doc call lists it in source_notes or the document wiki-links to it. Use this to decide what the next living-doc update must cover.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["project"],
+            "properties": {
+                "project": {"type": "string", "description": "Project slug"},
+            },
+        },
+    },
+    {
+        "name": "get_digest",
+        "description": "Cross-project digest of the last N days by event date: per-project note counts by kind and author, active threads, living-doc updates, undistilled backlog, plus every decision / negative / result note.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "days": {"type": "integer", "default": 7},
             },
         },
     },
@@ -1476,6 +1589,10 @@ def mcp(request: dict[str, Any], principal: Principal = Depends(auth)) -> Any:
                 result = update_living_doc(LivingDocRequest.model_validate(arguments), principal)
             elif name == "get_living_doc_history":
                 result = living_doc_history(**arguments)
+            elif name == "list_undistilled_notes":
+                result = list_undistilled_notes(**arguments)
+            elif name == "get_digest":
+                result = get_digest(**arguments)
             elif name == "read_note":
                 result = read_note(**arguments)
             elif name == "ingest_raw_artifact":
