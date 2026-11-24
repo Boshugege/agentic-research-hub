@@ -37,3 +37,31 @@
 - **Date**: 2026-11-23
 - **Decision**: replace SilverBullet on loopback port `18081` with a purpose-built, password-authenticated single-page Research Hub Workbench served directly by `hub-api`. Keep Forgejo on `18082` for Git hosting, PR review, and mirroring.
 - **Rationale**: SilverBullet lacked a persistent project sidebar, vertical timeline feed, inline `LIVING_DOC.md` Git Diff viewer, and built-in login protection by default. Serving the Workbench from `hub-api` gives human users a dedicated project/timeline/diff UI behind signed `HttpOnly` cookie auth while preserving 100% Git-first Markdown SSOT and MCP/REST compatibility. SilverBullet remains available in `compose.yml` under the optional `legacy-silverbullet` profile.
+
+## ADR-0008 Note kinds, threads, and note-to-note links
+
+- **Status**: accepted
+- **Date**: 2026-11-24
+- **Decision**: timeline notes carry `kind`, an optional `thread`, and `follows` / `supersedes` lists of note paths in their frontmatter. Threads are derived by scanning notes; there is no separate thread registry.
+- **Rationale**: a reverse-chronological list records when things happened but not why one step led to the next. Free-form tags never converged on a vocabulary. A small fixed set of kinds makes decisions and negative results findable, and explicit links let a line of reasoning be read in order. Keeping everything in note frontmatter preserves Markdown-in-Git as the only source of truth.
+
+## ADR-0009 Optimistic concurrency for LIVING_DOC.md
+
+- **Status**: accepted
+- **Date**: 2026-11-24
+- **Decision**: `update_living_doc` takes `base_commit`. Whole-document replacement requires it and is refused if the document changed since. A stale section update is accepted only when that section is unchanged since `base_commit`.
+- **Rationale**: the process lock serialises writes but cannot tell that a writer is working from an old read, so two agents on one project silently overwrote each other. Section-level checking lets agents working on different sections proceed without a retry.
+
+## ADR-0010 Per-agent keys
+
+- **Status**: accepted
+- **Date**: 2026-11-24
+- **Decision**: agents may be issued individual keys, stored as SHA-256 digests in the state directory. The server assigns the actor name for such keys and can limit writes to listed projects. The shared `AGENT_API_KEY` remains valid.
+- **Rationale**: with one shared key the `Actor:` trailer was self-declared and no single agent could be revoked or scoped. Keys live in the state directory rather than the environment file so they can be added and revoked without restarting the service.
+
+## ADR-0011 Distillation is derived, not stored
+
+- **Status**: accepted
+- **Date**: 2026-11-24
+- **Decision**: a note counts as distilled when a commit touching the project's `LIVING_DOC.md` names it in `Source-Notes`, or the document wiki-links to it. Superseded notes are excluded from the backlog. The unused `distilled_into_commit` frontmatter field is left in place but not relied on.
+- **Rationale**: deriving the state from Git history and document links needs no second write to the note and cannot drift from what the living doc actually cites.

@@ -49,7 +49,7 @@ NOTE_KINDS = ("note", "idea", "plan", "result", "negative", "decision", "meeting
 LOCK = threading.RLock()
 LOGIN_FAILURES: dict[str, list[float]] = defaultdict(list)
 
-app = FastAPI(title="Agentic Research Hub API", version="0.3.0")
+app = FastAPI(title="Agentic Research Hub API", version="0.4.0")
 
 
 def now() -> datetime:
@@ -1534,7 +1534,7 @@ MCP_TOOLS: list[dict[str, Any]] = [
 def mcp_info() -> dict[str, Any]:
     return {
         "name": "agentic-research-hub",
-        "version": "0.3.0",
+        "version": "0.4.0",
         "transport": "streamable-http-jsonrpc",
         "tools_count": len(MCP_TOOLS),
     }
@@ -1554,7 +1554,7 @@ def mcp(request: dict[str, Any], principal: Principal = Depends(auth)) -> Any:
             "result": {
                 "protocolVersion": client_version,
                 "capabilities": {"tools": {"listChanged": False}},
-                "serverInfo": {"name": "agentic-research-hub", "version": "0.3.0"},
+                "serverInfo": {"name": "agentic-research-hub", "version": "0.4.0"},
             },
         }
 
