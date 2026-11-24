@@ -196,6 +196,38 @@ with tempfile.TemporaryDirectory() as td:
     r = client.post("/api/v1/search", headers=headers, json={"query": "body", "project": "new-sensor-lab", "kind": "negative"})
     assert {x["path"] for x in r.json()["results"]} == {result["path"]}, r.text
 
+    # 3e. Per-agent keys: server-assigned identity, project-scoped writes, revocation
+    from hub_api import keys as agent_keys
+    bot_key = agent_keys.add("sensor-bot", ["new-sensor-lab"])
+    bot = {"Authorization": f"Bearer {bot_key}"}
+    me = client.get("/api/v1/auth/me", headers=bot).json()["principal"]
+    assert me == {"kind": "agent", "name": "sensor-bot", "write_projects": ["new-sensor-lab"]}, me
+    assert client.get("/api/v1/auth/me", headers=headers).json()["principal"]["kind"] == "shared-key"
+
+    r = client.post("/api/v1/timeline", headers=bot, json={"project": "new-sensor-lab", "title": "Signed note", "content": "x", "author": "agent:impostor"})
+    assert r.status_code == 200, r.text
+    signed = client.get("/api/v1/notes", headers=bot, params={"path": r.json()["path"]}).json()
+    assert signed["frontmatter"]["author"] == "agent:sensor-bot", signed["frontmatter"]
+    last_commit = subprocess.check_output(["git", "-C", str(vault), "log", "-1", "--format=%b"], text=True)
+    assert "Actor: agent:sensor-bot" in last_commit, last_commit
+
+    assert client.post("/api/v1/timeline", headers=bot, json={"project": "misc", "title": "t", "content": "c"}).status_code == 403
+    assert client.post("/api/v1/living-doc", headers=bot, json={"project": "misc", "section": "Executive Summary", "summary": "s"}).status_code == 403
+    assert client.post("/api/v1/projects", headers=bot, json={"slug": "other-lab"}).status_code == 403
+    assert client.put("/api/v1/notes", headers=bot, json={"path": "_meta/projects.yaml", "content": "projects: {}"}).status_code == 403
+    assert client.get("/api/v1/projects/misc/context", headers=bot).status_code == 200
+    r = client.post("/mcp", headers=bot, json={"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": {"name": "append_timeline_note", "arguments": {"project": "misc", "title": "t", "content": "c"}}})
+    assert r.json()["result"]["isError"] is True and "may only write" in r.json()["result"]["content"][0]["text"], r.text
+
+    assert agent_keys.main(["revoke", "sensor-bot"]) == 0
+    assert client.get("/api/v1/auth/me", headers=bot).status_code == 401
+    assert client.get("/api/v1/auth/me", headers={"Authorization": "Bearer rh_not-a-real-key"}).status_code == 401
+
+    # 3f. An empty WEB_PASSWORD disables web login instead of accepting an empty password
+    saved_password, hub.WEB_PASSWORD = hub.WEB_PASSWORD, ""
+    assert client.post("/api/v1/auth/login", json={"password": ""}).status_code == 503
+    hub.WEB_PASSWORD = saved_password
+
     # 4. Standards-compliant MCP handshake + tools/list + tools/call
     r = client.post("/mcp", headers=headers, json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05"}})
     assert r.status_code == 200 and r.json()["result"]["serverInfo"]["name"] == "agentic-research-hub", r.text

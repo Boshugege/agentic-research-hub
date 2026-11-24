@@ -12,6 +12,7 @@ import subprocess
 import threading
 import time
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -21,6 +22,8 @@ import yaml
 from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field, ValidationError
+
+from hub_api import keys as agent_keys
 
 logger = logging.getLogger("hub_api")
 
@@ -64,7 +67,7 @@ def _sign_session(exp: int) -> str:
 
 
 def _verify_session(token: Optional[str]) -> bool:
-    if not token or "." not in token:
+    if not WEB_PASSWORD or not token or "." not in token:
         return False
     payload, sig = token.rsplit(".", 1)
     expected = hmac.new(SESSION_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
@@ -78,17 +81,47 @@ def _verify_session(token: Optional[str]) -> bool:
         return False
 
 
+@dataclass(frozen=True)
+class Principal:
+    """Who is calling: the human owner (web session), the shared legacy key, or a named agent."""
+
+    kind: str  # "owner" | "shared-key" | "agent"
+    name: str
+    projects: Optional[tuple[str, ...]] = None  # agents only; None = may write to every project
+
+    def describe(self) -> dict[str, Any]:
+        return {"kind": self.kind, "name": self.name, "write_projects": list(self.projects) if self.projects is not None else "all"}
+
+
 def auth(
     authorization: Optional[str] = Header(default=None),
     x_api_key: Optional[str] = Header(default=None),
     rh_session: Optional[str] = Cookie(default=None),
-) -> None:
+) -> Principal:
     supplied = x_api_key or (authorization[7:] if authorization and authorization.startswith("Bearer ") else None)
-    if supplied and hmac.compare_digest(supplied, API_KEY):
-        return
+    if supplied:
+        if API_KEY and hmac.compare_digest(supplied, API_KEY):
+            return Principal(kind="shared-key", name="shared-key")
+        agent = agent_keys.lookup(supplied)
+        if agent:
+            projects = agent["projects"]
+            return Principal(kind="agent", name=agent["name"], projects=tuple(projects) if projects is not None else None)
     if _verify_session(rh_session):
-        return
+        return Principal(kind="owner", name="owner")
     raise HTTPException(status_code=401, detail="authentication required")
+
+
+def acting_as(principal: Principal, declared: str) -> str:
+    """Agents with their own key are always recorded under that identity; others keep the declared actor."""
+    return f"agent:{principal.name}" if principal.kind == "agent" else declared
+
+
+def require_write(principal: Principal, project: str) -> None:
+    if principal.kind == "agent" and principal.projects is not None and project not in principal.projects:
+        raise HTTPException(
+            status_code=403,
+            detail=f"agent:{principal.name} may only write to: {', '.join(principal.projects) or '(no projects)'}",
+        )
 
 
 def run_git(*args: str, cwd: Path = VAULT, check: bool = True) -> str:
@@ -483,6 +516,8 @@ def login(payload: LoginRequest, request: Request, response: Response) -> dict[s
     if len(recent_fails) >= 10:
         raise HTTPException(status_code=429, detail="too many failed login attempts, retry in 5 minutes")
 
+    if not WEB_PASSWORD:
+        raise HTTPException(status_code=503, detail="web login is disabled: WEB_PASSWORD is not set")
     if not hmac.compare_digest(payload.password, WEB_PASSWORD):
         LOGIN_FAILURES[client_ip].append(now_ts)
         raise HTTPException(status_code=401, detail="invalid password")
@@ -509,10 +544,11 @@ def logout(response: Response) -> dict[str, bool]:
     return {"authenticated": False}
 
 
-@app.get("/api/v1/auth/me", dependencies=[Depends(auth)])
-def auth_me() -> dict[str, Any]:
+@app.get("/api/v1/auth/me")
+def auth_me(principal: Principal = Depends(auth)) -> dict[str, Any]:
     return {
         "authenticated": True,
+        "principal": principal.describe(),
         "forgejo_public_url": FORGEJO_PUBLIC_URL or None,
         "forgejo_repo": f"{FORGEJO_OWNER}/{FORGEJO_REPO}" if FORGEJO_OWNER else None,
     }
@@ -673,9 +709,11 @@ def list_projects(include_stats: bool = True) -> dict[str, Any]:
     return {"projects": data, "inbox_count": len(inbox)}
 
 
-@app.post("/api/v1/projects", dependencies=[Depends(auth)])
-def create_project(request: CreateProjectRequest) -> dict[str, Any]:
+@app.post("/api/v1/projects")
+def create_project(request: CreateProjectRequest, principal: Principal = Depends(auth)) -> dict[str, Any]:
     slug = validate_slug(request.slug)
+    require_write(principal, slug)
+    request = request.model_copy(update={"actor": acting_as(principal, request.actor)})
     display_name = (request.name or slug).strip()
     if request.status not in {"active", "paused", "archived"}:
         raise HTTPException(status_code=400, detail="status must be active, paused, or archived")
@@ -805,12 +843,15 @@ def read_note(path: str) -> dict[str, Any]:
     }
 
 
-@app.put("/api/v1/notes", dependencies=[Depends(auth)])
-def update_note(request: UpdateNoteRequest) -> dict[str, Any]:
+@app.put("/api/v1/notes")
+def update_note(request: UpdateNoteRequest, principal: Principal = Depends(auth)) -> dict[str, Any]:
     target = resolve_note(request.path)
     if not target.exists() or not target.is_file():
         raise HTTPException(status_code=404, detail=f"note not found: {request.path}")
     rel = str(target.relative_to(VAULT.resolve()))
+    rel_parts = Path(rel).parts
+    require_write(principal, rel_parts[1] if len(rel_parts) > 2 and rel_parts[0] == "projects" else "")
+    request = request.model_copy(update={"actor": acting_as(principal, request.actor)})
     with LOCK:
         _sync_pending_human_edits()
         if run_git("branch", "--show-current", check=False) != "main":
@@ -822,9 +863,11 @@ def update_note(request: UpdateNoteRequest) -> dict[str, Any]:
     return {"path": rel, "commit": sha}
 
 
-@app.post("/api/v1/timeline", dependencies=[Depends(auth)])
-def append_timeline_note(request: TimelineRequest) -> dict[str, Any]:
+@app.post("/api/v1/timeline")
+def append_timeline_note(request: TimelineRequest, principal: Principal = Depends(auth)) -> dict[str, Any]:
     root = project_path(request.project)
+    require_write(principal, request.project)
+    request = request.model_copy(update={"author": acting_as(principal, request.author)})
     if request.kind not in NOTE_KINDS:
         raise HTTPException(status_code=400, detail=f"kind must be one of: {', '.join(NOTE_KINDS)}")
     thread = normalize_thread(request.thread)
@@ -949,9 +992,11 @@ def _check_living_base(request: LivingDocRequest, rel: str, original: str) -> No
             raise stale
 
 
-@app.post("/api/v1/living-doc", dependencies=[Depends(auth)])
-def update_living_doc(request: LivingDocRequest) -> dict[str, Any]:
+@app.post("/api/v1/living-doc")
+def update_living_doc(request: LivingDocRequest, principal: Principal = Depends(auth)) -> dict[str, Any]:
     root = project_path(request.project)
+    require_write(principal, request.project)
+    request = request.model_copy(update={"actor": acting_as(principal, request.actor)})
     path = root / "LIVING_DOC.md"
     with LOCK:
         if request.mode not in {"direct", "pr"}:
@@ -1078,8 +1123,9 @@ def living_doc_diff(project: str, commit_sha: str) -> dict[str, Any]:
     }
 
 
-@app.post("/api/v1/artifacts", dependencies=[Depends(auth)])
-def ingest_raw_artifact(request: RawArtifactRequest) -> dict[str, Any]:
+@app.post("/api/v1/artifacts")
+def ingest_raw_artifact(request: RawArtifactRequest, principal: Principal = Depends(auth)) -> dict[str, Any]:
+    actor = acting_as(principal, "agent:hub-api")
     data = request.content.encode()
     digest = hashlib.sha256(data).hexdigest()
     if len(data) > 200 * 1024:
@@ -1101,14 +1147,14 @@ def ingest_raw_artifact(request: RawArtifactRequest) -> dict[str, Any]:
                 "title": request.filename,
                 "created_at": iso(),
                 "updated_at": iso(),
-                "author": "agent:hub-api",
+                "author": actor,
                 "status": "draft",
                 "tags": [],
             })
             + f"\n{request.summary}\n\n{request.content}\n"
         )
         rel = str(target.relative_to(VAULT))
-        sha = commit("chore(inbox): ingest raw artifact", "agent:hub-api", [rel])
+        sha = commit("chore(inbox): ingest raw artifact", actor, [rel])
     return {"storage": "vault", "path": rel, "commit": sha}
 
 
@@ -1155,10 +1201,11 @@ def list_inbox_items(category: str = "all") -> list[str]:
     return [str(path.relative_to(VAULT)) for root in roots if root.exists() for path in sorted(root.glob("*.md"))]
 
 
-@app.post("/api/v1/inbox/triage", dependencies=[Depends(auth)])
-def triage_inbox_item(request: TriageRequest) -> dict[str, Any]:
+@app.post("/api/v1/inbox/triage")
+def triage_inbox_item(request: TriageRequest, principal: Principal = Depends(auth)) -> dict[str, Any]:
     source = resolve_inbox_item(request.item_path)
     target_root = project_path(request.target_project)
+    require_write(principal, request.target_project)
     if not source.is_file():
         raise HTTPException(status_code=404, detail="inbox item not found")
     target = target_root / "timeline" / now().strftime("%Y-%m") / source.name
@@ -1179,7 +1226,7 @@ def triage_inbox_item(request: TriageRequest) -> dict[str, Any]:
         target.write_text(content)
         source.unlink()
         rel = str(target.relative_to(VAULT))
-        sha = commit(f"triage({request.target_project}): move {source.name}", "agent:hub-api", [request.item_path, rel])
+        sha = commit(f"triage({request.target_project}): move {source.name}", acting_as(principal, "agent:hub-api"), [request.item_path, rel])
     return {"path": rel, "commit": sha}
 
 
@@ -1380,8 +1427,8 @@ def mcp_info() -> dict[str, Any]:
     }
 
 
-@app.post("/mcp", dependencies=[Depends(auth)])
-def mcp(request: dict[str, Any]) -> Any:
+@app.post("/mcp")
+def mcp(request: dict[str, Any], principal: Principal = Depends(auth)) -> Any:
     method = request.get("method")
     req_id = request.get("id")
     params = request.get("params") or {}
@@ -1416,7 +1463,7 @@ def mcp(request: dict[str, Any]) -> Any:
             if name == "list_projects":
                 result = list_projects(**arguments)
             elif name == "create_project":
-                result = create_project(CreateProjectRequest.model_validate(arguments))
+                result = create_project(CreateProjectRequest.model_validate(arguments), principal)
             elif name == "get_project_context":
                 result = get_project_context(**arguments)
             elif name == "list_timeline":
@@ -1424,21 +1471,21 @@ def mcp(request: dict[str, Any]) -> Any:
             elif name == "list_threads":
                 result = list_threads(**arguments)
             elif name == "append_timeline_note":
-                result = append_timeline_note(TimelineRequest.model_validate(arguments))
+                result = append_timeline_note(TimelineRequest.model_validate(arguments), principal)
             elif name == "update_living_doc":
-                result = update_living_doc(LivingDocRequest.model_validate(arguments))
+                result = update_living_doc(LivingDocRequest.model_validate(arguments), principal)
             elif name == "get_living_doc_history":
                 result = living_doc_history(**arguments)
             elif name == "read_note":
                 result = read_note(**arguments)
             elif name == "ingest_raw_artifact":
-                result = ingest_raw_artifact(RawArtifactRequest.model_validate(arguments))
+                result = ingest_raw_artifact(RawArtifactRequest.model_validate(arguments), principal)
             elif name == "search_knowledge":
                 result = search_knowledge(SearchRequest.model_validate(arguments))
             elif name == "list_inbox_items":
                 result = list_inbox_items(**arguments)
             elif name == "triage_inbox_item":
-                result = triage_inbox_item(TriageRequest.model_validate(arguments))
+                result = triage_inbox_item(TriageRequest.model_validate(arguments), principal)
             else:
                 return {
                     "jsonrpc": "2.0",
