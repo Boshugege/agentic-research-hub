@@ -119,6 +119,37 @@ with tempfile.TemporaryDirectory() as td:
     cur_branch = subprocess.check_output(["git", "-C", str(vault), "branch", "--show-current"], text=True).strip()
     assert cur_branch == "main", f"expected main, got {cur_branch}"
 
+    # 3b. Project context filters timeline by event_date, not file mtime
+    r = client.post("/api/v1/timeline", headers=headers, json={"project": "new-sensor-lab", "title": "Fresh Run", "content": "Today."})
+    assert r.status_code == 200, r.text
+    fresh_path = r.json()["path"]
+    recent = [n["path"] for n in client.get("/api/v1/projects/new-sensor-lab/context", headers=headers, params={"recent_days": 14}).json()["timeline"]]
+    assert recent == [fresh_path], recent
+    everything = [n["path"] for n in client.get("/api/v1/projects/new-sensor-lab/context", headers=headers, params={"recent_days": 36500}).json()["timeline"]]
+    assert set(everything) == {fresh_path, note_path}, everything
+
+    # 3c. Path guards: Git internals are off limits, triage only moves _inbox items
+    assert client.get("/api/v1/notes", headers=headers, params={"path": ".git/config"}).status_code == 400
+    git_config_before = (vault / ".git/config").read_text()
+    r = client.put("/api/v1/notes", headers=headers, json={"path": ".git/config", "content": "[core]\n"})
+    assert r.status_code == 400 and (vault / ".git/config").read_text() == git_config_before, r.text
+    assert client.get("/api/v1/notes", headers=headers, params={"path": "../outside.md"}).status_code == 400
+
+    living_rel = "projects/new-sensor-lab/LIVING_DOC.md"
+    r = client.post("/api/v1/inbox/triage", headers=headers, json={"item_path": living_rel, "target_project": "new-sensor-lab", "distilled_content": "x"})
+    assert r.status_code == 400 and (vault / living_rel).exists(), r.text
+
+    r = client.post("/api/v1/artifacts", headers=headers, json={"content": "raw log line", "filename": "run.log", "project": "new-sensor-lab"})
+    assert r.status_code == 200 and r.json()["storage"] == "vault", r.text
+    inbox_item = r.json()["path"]
+    r = client.post("/api/v1/inbox/triage", headers=headers, json={"item_path": inbox_item, "target_project": "new-sensor-lab", "distilled_content": "Distilled run log."})
+    assert r.status_code == 200 and not (vault / inbox_item).exists() and (vault / r.json()["path"]).exists(), r.text
+
+    r = client.post("/api/v1/search", headers=headers, json={"query": "a", "project": "../.."})
+    assert r.status_code == 404, r.text
+    r = client.post("/api/v1/search", headers=headers, json={"query": "Calibration", "project": "new-sensor-lab"})
+    assert r.status_code == 200 and r.json()["results"], r.text
+
     # 4. Standards-compliant MCP handshake + tools/list + tools/call
     r = client.post("/mcp", headers=headers, json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05"}})
     assert r.status_code == 200 and r.json()["result"]["serverInfo"]["name"] == "agentic-research-hub", r.text

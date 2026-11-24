@@ -193,6 +193,38 @@ def resolve_under(base: Path, rel_path: str) -> Path:
     return target
 
 
+def resolve_note(rel_path: str) -> Path:
+    """Resolve a vault-relative note path, refusing Git internals."""
+    target = resolve_under(VAULT, rel_path)
+    if ".git" in target.relative_to(VAULT.resolve()).parts:
+        raise HTTPException(status_code=400, detail="path points into Git internals")
+    return target
+
+
+def resolve_inbox_item(rel_path: str) -> Path:
+    """Resolve a vault-relative path that must be a file inside _inbox/."""
+    target = resolve_note(rel_path)
+    try:
+        target.relative_to((VAULT / "_inbox").resolve())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="item_path must be inside _inbox/") from exc
+    return target
+
+
+def note_event_datetime(meta: dict[str, Any], path: Path) -> datetime:
+    """When the noted event happened: event_date, then created_at, then file mtime."""
+    for key in ("event_date", "created_at"):
+        value = meta.get(key)
+        if isinstance(value, datetime):
+            return value if value.tzinfo else value.replace(tzinfo=UTC8)
+        if value:
+            try:
+                return parse_event_datetime(str(value))
+            except HTTPException:
+                continue
+    return datetime.fromtimestamp(path.stat().st_mtime, UTC8)
+
+
 def safe_name(value: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._\-\u4e00-\u9fff]+", "-", value).strip("-")
     return cleaned[:80] or "note"
@@ -646,10 +678,10 @@ def get_project_context(project: str, recent_days: int = 14, include_lit: bool =
     cutoff = now() - timedelta(days=recent_days)
     timeline = []
     for path in sorted((root / "timeline").rglob("*.md"), reverse=True) if (root / "timeline").exists() else []:
-        stat = datetime.fromtimestamp(path.stat().st_mtime, UTC8)
-        if stat >= cutoff:
-            text = path.read_text(errors="ignore")
-            timeline.append({"path": str(path.relative_to(VAULT)), "frontmatter": parse_frontmatter(text), "content": text})
+        text = path.read_text(errors="ignore")
+        meta = parse_frontmatter(text)
+        if note_event_datetime(meta, path) >= cutoff:
+            timeline.append({"path": str(path.relative_to(VAULT)), "frontmatter": meta, "content": text})
     literature = []
     if include_lit and (root / "literature").exists():
         literature = [str(path.relative_to(VAULT)) for path in sorted((root / "literature").glob("*.md"))]
@@ -666,7 +698,7 @@ def get_project_context(project: str, recent_days: int = 14, include_lit: bool =
 
 @app.get("/api/v1/notes", dependencies=[Depends(auth)])
 def read_note(path: str) -> dict[str, Any]:
-    target = resolve_under(VAULT, path)
+    target = resolve_note(path)
     if not target.exists() or not target.is_file():
         raise HTTPException(status_code=404, detail=f"note not found: {path}")
     text = target.read_text(errors="ignore")
@@ -680,7 +712,7 @@ def read_note(path: str) -> dict[str, Any]:
 
 @app.put("/api/v1/notes", dependencies=[Depends(auth)])
 def update_note(request: UpdateNoteRequest) -> dict[str, Any]:
-    target = resolve_under(VAULT, request.path)
+    target = resolve_note(request.path)
     if not target.exists() or not target.is_file():
         raise HTTPException(status_code=404, detail=f"note not found: {request.path}")
     rel = str(target.relative_to(VAULT.resolve()))
@@ -924,7 +956,7 @@ def get_blob(rel_path: str) -> FileResponse:
 
 @app.post("/api/v1/search", dependencies=[Depends(auth)])
 def search_knowledge(request: SearchRequest) -> dict[str, Any]:
-    root = VAULT / "projects" / request.project if request.project else VAULT
+    root = project_path(request.project) if request.project else VAULT
     results = []
     query = request.query.lower().strip()
     if not query:
@@ -954,9 +986,9 @@ def list_inbox_items(category: str = "all") -> list[str]:
 
 @app.post("/api/v1/inbox/triage", dependencies=[Depends(auth)])
 def triage_inbox_item(request: TriageRequest) -> dict[str, Any]:
-    source = resolve_under(VAULT, request.item_path)
+    source = resolve_inbox_item(request.item_path)
     target_root = project_path(request.target_project)
-    if not source.exists():
+    if not source.is_file():
         raise HTTPException(status_code=404, detail="inbox item not found")
     target = target_root / "timeline" / now().strftime("%Y-%m") / source.name
     with LOCK:
@@ -964,6 +996,10 @@ def triage_inbox_item(request: TriageRequest) -> dict[str, Any]:
         if run_git("branch", "--show-current", check=False) != "main":
             run_git("switch", "main")
         target.parent.mkdir(parents=True, exist_ok=True)
+        counter = 1
+        while target.exists():
+            target = target.with_name(f"{source.stem}-{counter}{source.suffix}")
+            counter += 1
         content = request.distilled_content
         if not content.startswith("---"):
             meta = parse_frontmatter(source.read_text(errors="ignore"))
